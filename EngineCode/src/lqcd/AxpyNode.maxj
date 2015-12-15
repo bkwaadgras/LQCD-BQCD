@@ -1,0 +1,90 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+public class AxpyNode extends KernelLib {
+	LQCDConstants m_constants;
+	private final DFESpinor inX;
+	private final DFESpinor inY;
+	private final DFESpinor output;
+	private final DFEVar multiplier;
+
+	/*protected AxpyNode (LQCDConstants constants, int numBits, int max)
+	{
+		super(constants.getKernel());
+		DFESpinorType spinorType = new DFESpinorType(constants,
+			new DFEComplexType(
+				dfeFixMax(numBits, max, SignMode.TWOSCOMPLEMENT))
+		);
+
+		m_constants=constants;
+		inX = spinorType.newInstance(constants.getKernel());
+		inY = spinorType.newInstance(constants.getKernel());
+		multiplier=dfeFixMax(numBits, max, SignMode.TWOSCOMPLEMENT).newInstance(this);
+		output = applyAxpy();
+	}
+	protected AxpyNode (LQCDConstants constants, DFEType realType)
+	{
+		super(constants.getKernel());
+		DFESpinorType spinorType = new DFESpinorType(constants,
+				new DFEComplexType(realType));
+		m_constants=constants;
+		inX = spinorType.newInstance(constants.getKernel());
+		inY = spinorType.newInstance(constants.getKernel());
+		multiplier=realType.newInstance(this);
+		output = applyAxpy();
+	}*/
+
+	protected AxpyNode (LQCDConstants constants, DFESpinorType spinorType, DFEType realType)
+	{
+		super(constants.getKernel());
+		m_constants=constants;
+		inX = spinorType.newInstance(constants.getKernel());
+		inY = spinorType.newInstance(constants.getKernel());
+		multiplier = realType.newInstance(this);
+		output = applyAxpy();
+	}
+
+	protected AxpyNode (LQCDConstants constants, DFESpinorType spinorType, DFEType realType,
+			int bitSizeOfShift)
+	{
+		super(constants.getKernel());
+		m_constants=constants;
+		inX = spinorType.newInstance(constants.getKernel());
+		inY = spinorType.newInstance(constants.getKernel());
+		multiplier = realType.newInstance(this);
+		output = applyAxpy(bitSizeOfShift);
+	}
+
+	private DFESpinor applyAxpy()
+	{
+		DFESpinor aInX = inX*multiplier;
+		return inY.carefullyAdd(aInX);
+	}
+
+	private DFESpinor applyAxpy(int bitSizeOfShift)
+	{
+		DFESpinor aInX = inX*multiplier;
+		return inY.carefullyAdd(aInX, bitSizeOfShift);
+	}
+
+	public DFESpinor getInputX()
+	{
+		return inX;
+	}
+	public DFESpinor getInputY()
+	{
+		return inY;
+	}
+	public DFEVar getMultiplier()
+	{
+		return multiplier;
+	}
+	public DFESpinor getOutput()
+	{
+		return output;
+	}
+
+}

@@ -1,0 +1,72 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+
+public class DFESpinorMux extends KernelLib
+{
+	private final DFESpinor inSpinorTrue;
+	private final DFESpinor inSpinorFalse;
+	private final DFESpinor outSpinor;
+	private final DFEVar determinator;
+
+	protected DFESpinorMux (LQCDConstants constants, int numBits, int max)
+	{
+		super(constants.getKernel());
+		DFESpinorType spinorType = new DFESpinorType(constants,
+				new DFEComplexType(
+					dfeFixMax(numBits, max, SignMode.TWOSCOMPLEMENT) )
+		);
+		/*inSpinorTrue = DFESpinor.createInstance(constants, numBits, max);
+		inSpinorFalse = DFESpinor.createInstance(constants, numBits, max);*/
+		inSpinorTrue = spinorType.newInstance(constants.getKernel());
+		inSpinorFalse = spinorType.newInstance(constants.getKernel());
+		determinator = dfeBool().newInstance(this);
+		outSpinor = (new DFEQCDSelector(constants, determinator)) ?
+				inSpinorTrue : inSpinorFalse;
+	}
+
+	protected DFESpinorMux (LQCDConstants constants, DFEType realType)
+	{
+		super(constants.getKernel());
+		DFESpinorType spinorType = new DFESpinorType(constants,
+				new DFEComplexType(realType));
+		/*inSpinorTrue = DFESpinor.createInstance(constants, realType);
+		inSpinorFalse = DFESpinor.createInstance(constants, realType);*/
+		inSpinorTrue = spinorType.newInstance(constants.getKernel());
+		inSpinorFalse = spinorType.newInstance(constants.getKernel());
+		determinator = dfeBool().newInstance(this);
+		outSpinor = (new DFEQCDSelector(constants, determinator)) ?
+				inSpinorTrue : inSpinorFalse;
+	}
+
+	protected DFESpinorMux (LQCDConstants constants, DFESpinorType spinorType)
+	{
+		super(constants.getKernel());
+		inSpinorTrue = spinorType.newInstance(constants.getKernel());
+		inSpinorFalse = spinorType.newInstance(constants.getKernel());
+		determinator = dfeBool().newInstance(this);
+		outSpinor = (new DFEQCDSelector(constants, determinator)) ?
+				inSpinorTrue : inSpinorFalse;
+	}
+
+	public DFESpinor getInputTrue()
+	{
+		return inSpinorTrue;
+	}
+	public DFESpinor getInputFalse()
+	{
+		return inSpinorFalse;
+	}
+	public DFEVar getDeterminator()
+	{
+		return determinator;
+	}
+	public DFESpinor getOutput()
+	{
+		return outSpinor;
+	}
+}

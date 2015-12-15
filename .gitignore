@@ -1,0 +1,9 @@
+RunRules/Simulation/*/*
+RunRules/Simulation/build.log
+RunRules/Simulation/.maxcompiler-activity.be
+RunRules/DFE/*/*
+RunRules/DFE/build.log
+RunRules/DFE/.maxcompiler-activity.be
+.gitignore~
+out_*_spinor_*_\(k=*\).txt
+!CPUCode/spinors-by-iteration/dslash-c/*

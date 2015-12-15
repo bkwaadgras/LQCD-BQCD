@@ -1,0 +1,130 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+/**
+ * Represents the clover operator, performed over the course of two ticks.
+ * Note: the constructor should be fed the correct half of the clover matrix!
+ *
+ * @author Bas Kwaadgras
+ */
+
+public class DFEHalfClover extends KernelLib
+{
+	public DFEComplex [] a;
+
+	private final DFESpinor inSpinor;
+	private final DFESpinor outSpinor;
+
+	private final LQCDConstants m_constants;
+	private final DFEVar m_iter;
+
+	protected DFEHalfClover(LQCDConstants constants, DFEVector<DFEComplex> initClover,
+			DFEVar cloverDiagShift, DFEVar cloverOffdiagShift, DFEVar iter,
+			DFESpinorType spinorType, DFEType realType)
+	{
+		super(constants.getKernel());
+		m_constants = constants;
+		m_iter = iter;
+		a = new DFEComplex[18];
+		for(int j=0; j<18; j++)
+		{
+			a[j]=initClover[j].cast(new DFEComplexType(realType));
+			if(j==0 || j==10 || j==16)
+			{
+				a[j]=DFEComplexType.newInstance(this,
+						a[j].getReal() >> cloverDiagShift,
+						a[j].getImaginary() >> cloverDiagShift
+				);
+			}
+			else
+			{
+				a[j]=DFEComplexType.newInstance(this,
+						a[j].getReal() >> cloverOffdiagShift,
+						a[j].getImaginary() >> cloverOffdiagShift
+				);
+			}
+		}
+		inSpinor = spinorType.newInstance(constants.getKernel());
+		outSpinor = applyClover(inSpinor);
+	}
+
+	public DFESpinor getInput()
+	{
+		return inSpinor;
+	}
+	public DFESpinor getOutput()
+	{
+		return outSpinor;
+	}
+
+	private DFESpinor applyClover(DFESpinor k)
+	{
+		DFESu3Vector addend0 = m_iter ? k.streamoffset(-1).s0 : k.s0;
+		DFESu3Vector addend2 = m_iter ? -k.streamoffset(-1).s2 : k.s2;
+		DFESu3Vector addend1 = m_iter ? k.streamoffset(-1).s1 : k.s1;
+		DFESu3Vector addend3 = m_iter ? -k.streamoffset(-1).s3 : k.s3;
+
+
+
+		/*DFESu3Vector x0 = m_iter===0 ? k.s0 + k.s2 : k.streamoffset(-1).s0 - k.streamoffset(-1).s2;
+		DFESu3Vector x1 = m_iter===0 ? k.s1 + k.s3 : k.streamoffset(-1).s1 - k.streamoffset(-1).s3;*/
+		DFESu3Vector x0 = addend0 + addend2;
+		DFESu3Vector x1 = addend1 + addend3;
+
+		DFEComplex y0c0 =
+					a[0].getReal() * x0.getC0()		+	a[1] * x0.getC1()				+
+					a[2] * x0.getC2()				+	a[3] * x1.getC0()				+
+					a[4] * x1.getC1()				+	a[5] * x1.getC2();
+		DFEComplex y0c1 =
+					a[1].conjugate() * x0.getC0()	+	a[0].getImaginary() * x0.getC1()+
+					a[6] * x0.getC2()				+	a[7] * x1.getC0() 				+
+					a[8] * x1.getC1()				+	a[9] * x1.getC2();
+
+		DFEComplex y0c2 =
+					a[2].conjugate() * x0.getC0()	+ 	a[6].conjugate() * x0.getC1()	+
+					a[10].getReal() * x0.getC2()	+ 	a[11] * x1.getC0()				+
+					a[12] * x1.getC1()				+ 	a[13] * x1.getC2();
+
+		DFEComplex y1c0 =
+					a[3].conjugate() * x0.getC0()	+	a[7].conjugate() * x0.getC1()	+
+					a[11].conjugate() * x0.getC2()	+	a[10].getImaginary() *x1.getC0()+
+					a[14] * x1.getC1()				+ 	a[15] * x1.getC2();
+
+		DFEComplex y1c1 =
+					a[4].conjugate() * x0.getC0()	+	a[8].conjugate() * x0.getC1()	+
+					a[12].conjugate() * x0.getC2()	+	a[14].conjugate() * x1.getC0()	+
+					a[16].getReal() * x1.getC1()	+	a[17] * x1.getC2();
+
+		DFEComplex y1c2 =
+					a[5].conjugate() * x0.getC0()	+	a[9].conjugate() * x0.getC1()	+
+					a[13].conjugate() * x0.getC2()	+	a[15].conjugate() * x1.getC0()	+
+					a[17].conjugate() * x1.getC1()	+	a[16].getImaginary() * x1.getC2();
+
+		DFESpinor outSpinorComplete = DFESpinorType.newInstance(m_constants,
+				stream.offset(y0c0, 1) + stream.offset(y0c0, 0),
+				stream.offset(y0c1, 1) + stream.offset(y0c1, 0),
+				stream.offset(y0c2, 1) + stream.offset(y0c2, 0),
+				stream.offset(y1c0, 1) + stream.offset(y1c0, 0),
+				stream.offset(y1c1, 1) + stream.offset(y1c1, 0),
+				stream.offset(y1c2, 1) + stream.offset(y1c2, 0),
+				stream.offset(y0c0, 0) - stream.offset(y0c0, 1),
+				stream.offset(y0c1, 0) - stream.offset(y0c1, 1),
+				stream.offset(y0c2, 0) - stream.offset(y0c2, 1),
+				-stream.offset(y1c0, 1) + stream.offset(y1c0, 0),
+				-stream.offset(y1c1, 1) + stream.offset(y1c1, 0),
+				-stream.offset(y1c2, 1) + stream.offset(y1c2, 0),
+				k.m_shift);
+
+		DFESpinor toOutput = new DFEQCDSelector(m_constants, m_iter) ? 	outSpinorComplete.streamoffset(-1) :
+			outSpinorComplete;
+
+		return toOutput;
+	}
+
+}

@@ -1,0 +1,422 @@
+package lqcd;
+
+import static com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.sft;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.maxeler.maxcompiler.v2.errors.MaxCompilerAPIError;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.DoubtType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.KernelType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType.ConstantValue;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.utils.Bits;
+
+/**
+ * This type class keeps track of the variable types contained in a DFESpinor.
+ * Also provides methods for instantiating DFESpinors.
+ * @author Bas Kwaadgras
+ */
+public class DFESpinorType extends KernelType<DFESpinor>
+{
+	private final LQCDConstants m_constants;
+	private final DFEStructType m_struct_type;
+
+	private DFESpinorType(LQCDConstants constants, DFEStructType struct_type)
+	{
+		m_struct_type=struct_type;
+		m_constants = constants;
+	}
+
+	public DFESpinorType(LQCDConstants constants, DFESu3VectorType type)
+	{
+		this(constants, type, type, type, type);
+	}
+
+	public DFESpinorType(LQCDConstants constants, DFEComplexType type)
+	{
+		this( constants,
+				new DFESu3VectorType(constants, type), new DFESu3VectorType(constants, type),
+				new DFESu3VectorType(constants, type), new DFESu3VectorType(constants, type)
+		);
+	}
+
+
+	public DFESpinorType(LQCDConstants constants,
+			DFESu3VectorType s0_type, DFESu3VectorType s1_type,
+			DFESu3VectorType s2_type, DFESu3VectorType s3_type)
+	{
+		this(constants,
+			new DFEStructType(
+				sft("s0", s0_type),
+				sft("s1", s1_type),
+				sft("s2", s2_type),
+				sft("s3", s3_type)
+			)
+		);
+	}
+
+	public DFESpinorType(LQCDConstants constants,
+		DFEComplexType s0c0_type, DFEComplexType s0c1_type, DFEComplexType s0c2_type,
+		DFEComplexType s1c0_type, DFEComplexType s1c1_type, DFEComplexType s1c2_type,
+		DFEComplexType s2c0_type, DFEComplexType s2c1_type, DFEComplexType s2c2_type,
+		DFEComplexType s3c0_type, DFEComplexType s3c1_type, DFEComplexType s3c2_type
+	)
+	{
+		this(constants,
+			new DFEStructType(
+				sft("s0",
+					new DFESu3VectorType(
+							constants,	s0c0_type, s0c1_type, s0c2_type) ),
+				sft("s1",
+					new DFESu3VectorType(
+							constants,	s1c0_type, s1c1_type, s1c2_type) ),
+				sft("s2",
+					new DFESu3VectorType(
+							constants,	s2c0_type, s2c1_type, s2c2_type) ),
+				sft("s3",
+					new DFESu3VectorType(
+							constants,	s3c0_type, s3c1_type, s3c2_type) )
+			)
+		);
+	}
+
+	public DFESpinorType (LQCDConstants constants,
+			DFESpinorType a, DFESpinorType b)
+	{
+		this(constants,
+			new DFEStructType(
+				sft("s0", new DFESu3VectorType( constants, a.getS0Type(), b.getS0Type() ) ),
+				sft("s1", new DFESu3VectorType( constants, a.getS1Type(), b.getS1Type() ) ),
+				sft("s2", new DFESu3VectorType( constants, a.getS2Type(), b.getS2Type() ) ),
+				sft("s3", new DFESu3VectorType( constants, a.getS3Type(), b.getS3Type() ) )
+			)
+		);
+	}
+
+	public DFESu3VectorType getS0Type()
+	{
+		return (DFESu3VectorType)m_struct_type.getTypeForField("s0");
+	}
+	public DFESu3VectorType getS1Type()
+	{
+		return (DFESu3VectorType)m_struct_type.getTypeForField("s1");
+	}
+	public DFESu3VectorType getS2Type()
+	{
+		return (DFESu3VectorType)m_struct_type.getTypeForField("s2");
+	}
+	public DFESu3VectorType getS3Type()
+	{
+		return (DFESu3VectorType)m_struct_type.getTypeForField("s3");
+	}
+
+
+	@Override
+	public boolean isConcreteType() {
+		return m_struct_type.isConcreteType();
+	}
+
+	@Override
+	protected int realGetTotalBits() {
+		return m_struct_type.getTotalBits();
+	}
+
+	@Override
+	protected DFESpinor realUnpack(DFEVar src) {
+		return new DFESpinor(m_constants, m_struct_type.unpack(src),
+				KernelLib.dfeInt(7).newInstance(m_constants.getKernel()), this);
+	}
+
+	@Override
+	protected DFESpinor realUnpackWithDoubt(DFEVar src, DoubtType doubt_type)
+	{
+		if(!(doubt_type instanceof DFESpinorDoubtType))
+			throw new MaxCompilerAPIError(
+					"DFESpinor can only be unpacked with doubt using " +
+					"a DFESpinorDoubtType object.");
+
+		return
+			new DFESpinor(m_constants,
+				m_struct_type.unpackWithDoubt(
+					src,
+					((DFESpinorDoubtType)doubt_type).getDFEStructDoubtType()
+				),
+				KernelLib.dfeInt(7).newInstance(m_constants.getKernel()),
+				this
+			);
+	}
+
+
+	@Override
+	public int getTotalPrimitives() {
+		return m_struct_type.getTotalPrimitives();
+	}
+
+	@Override
+	protected DFESpinor realUnpackFromList(List<DFEVar> primitives) {
+		DFEStruct struct_data = m_struct_type.unpackFromList(primitives);
+
+		return new DFESpinor(m_constants, struct_data,
+				KernelLib.dfeInt(7).newInstance(m_constants.getKernel()), this);
+	}
+
+	public Bits encodeConstant(ConstantValue [] v) {
+		if(v.length<12)
+		{
+			throw new MaxCompilerAPIError("Parameter must be an array with length>=12");
+		}
+		if(!(v[0] instanceof ConstantValue))
+		{
+			throw new MaxCompilerAPIError("Parameter must be an array of ConstantValue!");
+		}
+		Map<String, ConstantValue> struct_value0 =
+			new HashMap<String, ConstantValue>();
+		Map<String, ConstantValue> struct_value1 =
+			new HashMap<String, ConstantValue>();
+		Map<String, ConstantValue> struct_value2 =
+			new HashMap<String, ConstantValue>();
+		Map<String, ConstantValue> struct_value3 =
+			new HashMap<String, ConstantValue>();
+		struct_value0.put("c0", v[0]);
+		struct_value0.put("c1", v[1]);
+		struct_value0.put("c2", v[2]);
+		struct_value1.put("c0", v[3]);
+		struct_value1.put("c1", v[4]);
+		struct_value1.put("c2", v[5]);
+		struct_value2.put("c0", v[6]);
+		struct_value2.put("c1", v[7]);
+		struct_value2.put("c2", v[8]);
+		struct_value3.put("c0", v[9]);
+		struct_value3.put("c1", v[10]);
+		struct_value3.put("c2", v[11]);
+
+		Map<String, Map<String, ConstantValue> > struct_value_comb =
+			new HashMap<String,  Map<String, ConstantValue> >();
+		struct_value_comb.put("s0", struct_value0);
+		struct_value_comb.put("s1", struct_value1);
+		struct_value_comb.put("s2", struct_value2);
+		struct_value_comb.put("s3", struct_value3);
+		return m_struct_type.encodeConstant(struct_value0);
+	}
+
+	public Bits encodeConstant(Collection<?> col) {
+		return encodeConstant(col.toArray());
+	}
+
+
+	@Override
+	public Bits encodeConstant(Object value) {
+		/*
+		assertConcrete("encode constant");
+
+		if (value instanceof Bits) {
+			Bits bvalue = (Bits) value;
+			if (bvalue.getWidth() != this.getTotalBits())
+				throw new MaxCompilerAPIError("Size mismatch");
+			return bvalue;
+		}
+		if(value instanceof Collection<?>)
+		{
+			return encodeConstant( value );
+		}
+
+		if(! (value instanceof ConstantValue []) )
+		{
+			throw new MaxCompilerAPIError(
+					"Parameter must be a collection or array of ConstantValue!");
+		}
+		return encodeConstant((ConstantValue [])value);
+		 */
+		assertConcrete("encode constant");
+
+		if (value instanceof Bits) {
+			Bits bvalue = (Bits) value;
+			if (bvalue.getWidth() != this.getTotalBits())
+				throw new MaxCompilerAPIError("Size mismatch");
+			return bvalue;
+		}
+		if(value instanceof Collection<?>)
+		{
+			return encodeConstant( value );
+		}
+
+		if(! (value instanceof ConstantValue []) )
+		{
+			throw new MaxCompilerAPIError(
+					"Parameter must be a collection or array of ConstantValue!");
+		}
+		return encodeConstant(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public ArrayList< ArrayList<ConstantValue> > decodeConstant(Bits raw_bits) {
+		assertConcrete("decode constant");
+
+		Map<String, Object> struct_data = m_struct_type.decodeConstant(raw_bits);
+
+		ArrayList< ArrayList<ConstantValue> > ret = new ArrayList< ArrayList<ConstantValue> >();
+
+		ret.add( (ArrayList<ConstantValue>)struct_data.get("s0") );
+		ret.add( (ArrayList<ConstantValue>)struct_data.get("s1") );
+		ret.add( (ArrayList<ConstantValue>)struct_data.get("s2") );
+		ret.add( (ArrayList<ConstantValue>)struct_data.get("s3") );
+
+		return ret;
+	}
+
+
+	@Override
+	public DFESpinor newInstance(KernelLib design, DoubtType doubt_type) {
+		if(!(doubt_type instanceof DFESpinorDoubtType))
+			throw new MaxCompilerAPIError(design.getManager(),
+				"DFESpinor instances can only be made using DFESpinorType objects.");
+
+		DFEStruct struct_data =
+			m_struct_type.newInstance(design, ((DFESpinorDoubtType)doubt_type).getDFEStructDoubtType());
+		DFEType shiftType = KernelLib.dfeInt(7);
+		DFEVar shift = shiftType.newInstance(design);
+
+		return new DFESpinor(m_constants, struct_data, shift, this);
+	}
+
+	public DFESpinor newZeroInstance(LQCDConstants constants, DFEVar spinorShift)
+	{
+		DFESu3Vector s0 = getS0Type().newZeroInstance();
+		DFESu3Vector s1 = getS0Type().newZeroInstance();
+		DFESu3Vector s2 = getS0Type().newZeroInstance();
+		DFESu3Vector s3 = getS0Type().newZeroInstance();
+
+		DFESpinorType new_type =
+			new DFESpinorType(constants, s0.getType(), s1.getType(),
+					s2.getType(), s3.getType() );
+
+		boolean new_has_doubt_info =
+					s0.getDoubtType()	.union(s1.getDoubtType())
+			.union(	s2.getDoubtType())	.union(s3.getDoubtType())
+			.hasDoubtInfo();
+
+		DFESpinorFullType new_full_type = new_has_doubt_info ?
+			new_type.getFullTypeWithDoubtInfo() : new_type.getFullTypeWithoutDoubtInfo();
+
+		DFESpinor new_inst = new_full_type.newInstance(constants.getKernel());
+		new_inst.setS0(s0);
+		new_inst.setS1(s1);
+		new_inst.setS2(s2);
+		new_inst.setS3(s3);
+		new_inst.m_shift = spinorShift;
+
+		return new_inst;
+	}
+
+
+	public static DFESpinor newInstance(LQCDConstants constants,
+			DFEComplex s0c0, DFEComplex s0c1, DFEComplex s0c2,
+			DFEComplex s1c0, DFEComplex s1c1, DFEComplex s1c2,
+			DFEComplex s2c0, DFEComplex s2c1, DFEComplex s2c2,
+			DFEComplex s3c0, DFEComplex s3c1, DFEComplex s3c2,
+			DFEVar spinorShift)
+	{
+		DFESu3Vector s0 = DFESu3VectorType.newInstance(constants,
+				s0c0, s0c1, s0c2);
+		DFESu3Vector s1 = DFESu3VectorType.newInstance(constants,
+				s1c0, s1c1, s1c2);
+		DFESu3Vector s2 = DFESu3VectorType.newInstance(constants,
+				s2c0, s2c1, s2c2);
+		DFESu3Vector s3 = DFESu3VectorType.newInstance(constants,
+				s3c0, s3c1, s3c2);
+
+		return newInstance(constants, s0, s1, s2, s3, spinorShift);
+	}
+
+	public static DFESpinor newInstance(LQCDConstants constants,
+			DFESu3Vector s0, DFESu3Vector s1, DFESu3Vector s2, DFESu3Vector s3,
+			DFEVar spinorShift)
+	{
+		DFESpinorType new_type =
+			new DFESpinorType(constants, s0.getType(), s1.getType(),
+					s2.getType(), s3.getType() );
+
+		boolean new_has_doubt_info =
+					s0.getDoubtType()	.union(s1.getDoubtType())
+			.union(	s2.getDoubtType())	.union(s3.getDoubtType())
+			.hasDoubtInfo();
+
+		DFESpinorFullType new_full_type = new_has_doubt_info ?
+			new_type.getFullTypeWithDoubtInfo() : new_type.getFullTypeWithoutDoubtInfo();
+
+		DFESpinor new_inst = new_full_type.newInstance(constants.getKernel());
+		new_inst.setS0(s0);
+		new_inst.setS1(s1);
+		new_inst.setS2(s2);
+		new_inst.setS3(s3);
+		new_inst.m_shift = spinorShift;
+
+		return new_inst;
+	}
+
+	@Override
+	public boolean equals(Object other_type) {
+		return
+			(other_type instanceof DFESpinorType) &&
+			((DFESpinorType)other_type).m_struct_type.equals(m_struct_type);
+	}
+
+	@Override
+	public boolean equalsIgnoreMax(KernelType<?> other_type) {
+		return
+			(other_type instanceof DFESpinorType) &&
+			((DFESpinorType)other_type).m_struct_type.equalsIgnoreMax(m_struct_type);
+	}
+
+	@Override
+	protected KernelType<?> realUnionWithMaxOfMaxes(KernelType<?> other_type) {
+		DFESpinorType foo = (DFESpinorType)other_type;
+
+		return new DFESpinorType(m_constants,
+				(DFEStructType)m_struct_type.unionWithMaxOfMaxes(foo.m_struct_type));
+
+	}
+
+	@Override
+	public String toString() {
+		return
+		"{DFESpinorType: " +
+		m_struct_type.getTypeForField("s0") + ", " +
+		m_struct_type.getTypeForField("s1") + ", " +
+		m_struct_type.getTypeForField("s2") + ", " +
+		m_struct_type.getTypeForField("s3") + "} ";
+	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public DFESpinorFullType getFullTypeWithoutDoubtInfo() {
+		return new DFESpinorFullType(
+			new DFESpinorDoubtType (
+				m_struct_type.getFullTypeWithoutDoubtInfo().getDoubtType()),
+			this
+		);
+
+	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public DFESpinorFullType getFullTypeWithDoubtInfo() {
+		return new DFESpinorFullType(
+			new DFESpinorDoubtType (
+				m_struct_type.getFullTypeWithDoubtInfo().getDoubtType()),
+			this
+		);
+	}
+
+}

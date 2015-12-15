@@ -1,0 +1,199 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+
+/**
+ * This class serves as a placeholder for boolean variables that are used to select QCD data structures
+ * This is only needed to overload the ternaryIf operator to recognize user-defined classes
+ * @author Siavash Zangeneh
+ *
+ */
+public class DFEQCDSelector extends KernelLib {
+
+	private final DFEVar selector;
+
+	private final LQCDConstants m_constants;
+
+	/**
+	 * Constructor to instantiate the selector
+	 * @param constants holds information about the system such as original kernel object
+	 * @param v the variable that is used in ternaryIf for selection
+	 */
+	protected DFEQCDSelector(LQCDConstants constants, DFEVar v) {
+		super(constants.getKernel());
+		m_constants = constants;
+		selector = v;
+	}
+
+	public DFESu3 ternaryIf(DFESu3 a, DFESu3 b) {
+		DFESu3 temp = new DFESu3(m_constants);
+
+		temp.c00 = selector ? a.c00 : b.c00;
+		temp.c01 = selector ? a.c01 : b.c01;
+		temp.c02 = selector ? a.c02 : b.c02;
+		temp.c10 = selector ? a.c10 : b.c10;
+		temp.c11 = selector ? a.c11 : b.c11;
+		temp.c12 = selector ? a.c12 : b.c12;
+		temp.c20 = selector ? a.c20 : b.c20;
+		temp.c21 = selector ? a.c21 : b.c21;
+		temp.c22 = selector ? a.c22 : b.c22;
+
+		return temp;
+	}
+
+	/*public DFEHalfSpinor ternaryIf(DFEHalfSpinor a, DFEHalfSpinor b) {
+		DFEHalfSpinor temp = new DFEHalfSpinor(m_constants);
+
+		temp.s0 = this ? a.s0 : b.s0;
+		temp.s1 = this ? a.s1 : b.s1;
+
+		return temp;
+	}
+*/
+	public DFESpinor ternaryIf(DFESpinor a, DFESpinor b) {
+		/*int numBits=a.s0.m_numBits;
+		int max=a.s0.m_max;
+		DFESpinor temp = numBits<0 ?
+			new DFESpinor(m_constants) :
+			new DFESpinor(m_constants, numBits, max);*/
+
+		/*temp.s0 = this ? a.s0 : b.s0;
+		temp.s1 = this ? a.s1 : b.s1;
+		temp.s2 = this ? a.s2 : b.s2;
+		temp.s3 = this ? a.s3 : b.s3;*/
+		if(m_constants.bitGrowthInMuxes==true)
+		{
+			DFESu3VectorType toCastToS0 = new DFESu3VectorType(m_constants,
+				a.s0.getType(), b.s0.getType()
+			);
+			DFESu3VectorType toCastToS1 = new DFESu3VectorType(m_constants,
+				a.s1.getType(), b.s1.getType()
+			);
+			DFESu3VectorType toCastToS2 = new DFESu3VectorType(m_constants,
+				a.s2.getType(), b.s2.getType()
+			);
+			DFESu3VectorType toCastToS3 = new DFESu3VectorType(m_constants,
+				a.s3.getType(), b.s3.getType()
+			);
+
+			return DFESpinorType.newInstance(m_constants,
+				this ? a.s0.castElements(toCastToS0) : b.s0.castElements(toCastToS0),
+				this ? a.s1.castElements(toCastToS1) : b.s1.castElements(toCastToS1),
+				this ? a.s2.castElements(toCastToS2) : b.s2.castElements(toCastToS2),
+				this ? a.s3.castElements(toCastToS3) : b.s3.castElements(toCastToS3),
+				selector ? a.m_shift : b.m_shift );
+		}
+		else
+		{
+			return DFESpinorType.newInstance(m_constants,
+				this ? a.s0 : b.s0,
+				this ? a.s1 : b.s1,
+				this ? a.s2 : b.s2,
+				this ? a.s3 : b.s3,
+				selector ? a.m_shift : b.m_shift );
+		}
+	}
+
+	public DFESpinor mux(DFESpinor... inputs)
+	{
+		DFESu3Vector [] inputS0List=new DFESu3Vector[inputs.length];
+		DFESu3Vector [] inputS1List=new DFESu3Vector[inputs.length];
+		DFESu3Vector [] inputS2List=new DFESu3Vector[inputs.length];
+		DFESu3Vector [] inputS3List=new DFESu3Vector[inputs.length];
+		DFEVar [] inputShiftList = new DFEVar[inputs.length];
+
+		for(int i=0; i<inputs.length; i++)
+		{
+			inputS0List[i]=inputs[i].s0;
+			inputS1List[i]=inputs[i].s1;
+			inputS2List[i]=inputs[i].s2;
+			inputS3List[i]=inputs[i].s3;
+			inputShiftList[i]=inputs[i].m_shift;
+		}
+
+		return DFESpinorType.newInstance(m_constants,
+				this.mux(inputS0List),
+				this.mux(inputS1List),
+				this.mux(inputS2List),
+				this.mux(inputS3List),
+				control.mux(selector, inputShiftList));
+	}
+
+	public DFESu3Vector ternaryIf(DFESu3Vector a, DFESu3Vector b) {
+		/*int numBits=a.m_numBits;
+		int max=a.m_max;
+		DFESu3Vector temp = numBits<0 ?
+			new DFESu3Vector(m_constants) :
+			new DFESu3Vector(m_constants, numBits, max);
+
+		temp.c0 = selector ? a.c0 : b.c0;
+		temp.c1 = selector ? a.c1 : b.c1;
+		temp.c2 = selector ? a.c2 : b.c2;
+
+		return temp;*/
+
+		if(m_constants.bitGrowthInMuxes==true)
+		{
+			DFEComplexType toCastToC0 = DFESu3VectorType
+					.findSmallestTypeThatFits(a.getC0().getType(), b.getC0().getType());
+			DFEComplexType toCastToC1 = DFESu3VectorType
+					.findSmallestTypeThatFits(a.getC1().getType(), b.getC1().getType());
+			DFEComplexType toCastToC2 = DFESu3VectorType
+					.findSmallestTypeThatFits(a.getC2().getType(), b.getC2().getType());
+
+			return DFESu3VectorType.newInstance(m_constants,
+					selector ? a.getC0().cast(toCastToC0) : b.getC0().cast(toCastToC0),
+					selector ? a.getC1().cast(toCastToC1) : b.getC1().cast(toCastToC1),
+					selector ? a.getC2().cast(toCastToC2) : b.getC2().cast(toCastToC2)
+			);
+		}
+		else
+		{
+			return DFESu3VectorType.newInstance(m_constants,
+					selector ? a.getC0() : b.getC0(),
+					selector ? a.getC1() : b.getC1(),
+					selector ? a.getC2() : b.getC2()
+			);
+		}
+	}
+
+	public DFESu3Vector mux(DFESu3Vector... inputs)
+	{
+/*		int numBits=inputs[0].m_numBits;
+		int max=inputs[0].m_max;
+		DFESu3Vector temp = numBits < 0 ?
+				new DFESu3Vector(m_constants) :
+				new DFESu3Vector(m_constants, numBits, max);*/
+		DFEComplex [] inputC0List=new DFEComplex[inputs.length];
+		DFEComplex [] inputC1List=new DFEComplex[inputs.length];
+		DFEComplex [] inputC2List=new DFEComplex[inputs.length];
+		for(int i=0; i<inputs.length; i++)
+		{
+			inputC0List[i]=inputs[i].getC0();
+			inputC1List[i]=inputs[i].getC1();
+			inputC2List[i]=inputs[i].getC2();
+		}
+
+		/*temp.c0 = control.mux(selector, inputC0List);
+		temp.c1 = control.mux(selector, inputC1List);
+		temp.c2 = control.mux(selector, inputC2List);*/
+
+		return DFESu3VectorType.newInstance(m_constants,
+				 control.mux(selector, inputC0List),
+				 control.mux(selector, inputC1List),
+				 control.mux(selector, inputC2List));
+	}
+
+	public DFEComplex ternaryIf(DFEComplex a, DFEComplex b) {
+		return (selector ? a : b) ;
+	}
+
+	public DFEVar getSelector() {
+		return selector;
+	}
+
+
+}

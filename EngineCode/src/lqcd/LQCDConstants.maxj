@@ -1,0 +1,140 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+
+public class LQCDConstants extends KernelLib {
+
+	public int LX, LY, LZ, T, numPipes, loopOffset;
+	public int ticksPerSite;
+	public TargetLQCDType targetLQCDType;
+	public static DFEType realTypeStore = dfeFloat(8,24);
+	//public static DFEType realTypeStoreFix = dfeFixOffset(24,-20,SignMode.TWOSCOMPLEMENT);
+	public static DFEType realTypeStoreFix;
+	public static DFEComplexType complexTypeStore = new DFEComplexType(realTypeStore);
+	public static DFEComplexType complexTypeStoreFix;// = new DFEComplexType(realTypeStoreFix);
+	public static DFEType realTypeComputeOld = dfeFixOffset(25, -20, SignMode.TWOSCOMPLEMENT);
+
+	public static DFEComplexType complexTypeComputeOld = new DFEComplexType(realTypeComputeOld);
+
+	public boolean bitGrowthInMuxes;
+	public boolean debugMode;
+
+	protected LQCDConstants (
+			Kernel owner,
+			int LX_,
+			int LY_,
+			int LZ_,
+			int T_,
+			int numPipes_,
+			int loopOffset_,
+			TargetLQCDType targetLQCDType_,
+			boolean bitGrowthInMuxes_,
+			boolean debugMode_) {
+		super(owner);
+		LX = LX_;
+		LY = LY_;
+		LZ = LZ_;
+		T = T_;
+		numPipes = numPipes_;
+		loopOffset = loopOffset_;
+		targetLQCDType = targetLQCDType_;
+		ticksPerSite = 16/numPipes;
+		bitGrowthInMuxes = bitGrowthInMuxes_;
+		debugMode = debugMode_;
+
+		realTypeStoreFix = dfeFixOffset(
+			(Integer)owner.getManager().getEngineParameters().getParam("realStoreBits"),
+			(Integer)owner.getManager().getEngineParameters().getParam("realStoreOffset"),
+			SignMode.TWOSCOMPLEMENT);
+		complexTypeStoreFix = new DFEComplexType(realTypeStoreFix);
+
+		if (T%2 != 0) {
+			throw new RuntimeException("Dimention T should be even");
+		}
+
+		if (LX%2 != 0) {
+			throw new RuntimeException("Dimention X should be even");
+		}
+
+		if (LY%2 != 0) {
+			throw new RuntimeException("Dimention LY should be even");
+		}
+
+		if (LZ%2 != 0) {
+			throw new RuntimeException("Dimention LZ should be even");
+		}
+
+		if ((LY*LX/2)%(loopOffset) != 0) {
+			throw new RuntimeException("loopOffset should divide LY*LX/2");
+		}
+
+		if (numPipes < 2 || numPipes > 16 || !MathUtils.isPowerOf2(numPipes)) {
+			throw new RuntimeException("Number of pipes should be a positive integer that divides 16 and is greater than 1");
+		}
+
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredSpinorType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStore, 4*3);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredFixSpinorType () {
+		//DFEType realType=dfeFixOffset(24,-20,SignMode.TWOSCOMPLEMENT);
+		//DFEComplexType complexType = new DFEComplexType(realType);
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStoreFix, 4*3);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredSu3Type (int numPipes_) {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStore,9*(numPipes_/2));
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredFixSu3Type (int numPipes_) {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStoreFix,9*(numPipes_/2));
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredCloverType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStore, 36);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredFixCloverType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStoreFix, 36);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredFixHalfCloverType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeStoreFix, 18);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredHalfSpinorType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeComputeOld, 2*3);
+		return type;
+	}
+
+	static public DFEVectorType<DFEComplex> getVectoredSu3VectorType () {
+		DFEVectorType<DFEComplex> type =
+			new DFEVectorType<DFEComplex>(complexTypeComputeOld, 3);
+		return type;
+	}
+
+}

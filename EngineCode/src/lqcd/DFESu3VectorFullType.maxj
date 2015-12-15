@@ -1,0 +1,13 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.FullType;
+
+public class DFESu3VectorFullType extends
+						FullType<DFESu3VectorDoubtType, DFESu3VectorType, DFESu3Vector>
+{
+	public DFESu3VectorFullType(DFESu3VectorDoubtType doubt_type, DFESu3VectorType kernel_type)
+	{
+		super(doubt_type, kernel_type);
+	}
+
+}

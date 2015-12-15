@@ -1,0 +1,56 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.errors.MaxCompilerAPIError;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.DoubtType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructDoubtType;
+
+public class DFESu3VectorDoubtType extends DoubtType{
+	private final DFEStructDoubtType m_struct_doubt_type;
+
+	DFESu3VectorDoubtType(DFEStructDoubtType struct_doubt_type) {
+		m_struct_doubt_type = struct_doubt_type;
+	}
+
+	DFEStructDoubtType getDFEStructDoubtType() {
+		return m_struct_doubt_type;
+	}
+
+	@Override
+	public boolean equals(Object other) {
+		return
+			other instanceof DFESu3VectorDoubtType &&
+			((DFESu3VectorDoubtType)other).m_struct_doubt_type.equals(m_struct_doubt_type);
+	}
+
+	@Override
+	public int hashCode() {
+		return m_struct_doubt_type.hashCode();
+	}
+
+	@Override
+	public boolean hasDoubtInfo() {
+		return m_struct_doubt_type.hasDoubtInfo();
+	}
+
+	@Override
+	public int getTotalBits() {
+		return m_struct_doubt_type.getTotalBits();
+	}
+
+	@Override
+	public String toString() {
+		return "DFESu3VectorDoubtType<" + m_struct_doubt_type + ">";
+	}
+
+	@Override
+	public DoubtType union(DoubtType other_info) {
+		if(!(other_info instanceof DFESu3VectorDoubtType))
+			throw new MaxCompilerAPIError("Can only union with another DFESu3VectorDoubtType object.");
+
+		DFESu3VectorDoubtType kcomplex_doubt_type = (DFESu3VectorDoubtType)other_info;
+
+		return
+			new DFESu3VectorDoubtType(
+				m_struct_doubt_type.union(kcomplex_doubt_type.m_struct_doubt_type));
+	}
+}

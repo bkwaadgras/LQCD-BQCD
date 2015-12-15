@@ -1,0 +1,452 @@
+package lqcd;
+
+import maxpower.kernel.io.AspectChangeIO;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Bitops;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.CounterChain;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+class LQCDKernel extends Kernel {
+
+	private final int LMEM_BURST = 384 * 8; // in bits
+
+	private final int outputTickRangeLower;
+	private final int outputTickRangeUpper;
+	private final boolean bitGrowthInMuxes = true;
+	private final boolean debugMode = true;
+	private final DFEType inputCastType = dfeFixOffset(25, -23, SignMode.TWOSCOMPLEMENT);
+
+	protected LQCDKernel(
+			KernelParameters parameters,
+			int T,
+			int LX,
+			int LY,
+			int LZ,
+			int numPipes,
+			int loopOffset,
+			boolean passGauge,
+			TargetLQCDType targetLQCDType
+			)
+	{
+
+		super(parameters);
+
+		LQCDConstants constants = new LQCDConstants(this, LX, LY, LZ, T, numPipes, loopOffset, targetLQCDType, bitGrowthInMuxes, debugMode);
+		outputTickRangeLower=constants.ticksPerSite*LZ*LY*LX/2;
+		outputTickRangeUpper=constants.ticksPerSite*(T+1)*LZ*LY*LX/2;
+
+
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+				Optimization.offsetLargestMsb(), MathOps.MUL);
+		optimization.pushFixOpMode(Optimization.bitSizeAll(),
+				Optimization.offsetNoOverflow(), MathOps.ADD_SUB);
+
+		AspectChangeIO acio = new AspectChangeIO(this, LMEM_BURST);
+
+		DFEVar enableAxpyPost = io.scalarInput("enableAxpyPost", dfeBool() );
+		DFEVar axpyPostMultiplier = io.scalarInput("axpyPostMultiplier", LQCDConstants.realTypeStore )
+							.cast(inputCastType);
+		DFEVar axpyPreMultiplier = io.scalarInput("axpyPreMultiplier", LQCDConstants.realTypeStore )
+							.cast(inputCastType);
+		DFEVar dagger  = io.scalarInput("dagger", dfeBool() );
+		DFEVar ieo      = io.scalarInput("ieo", dfeBool() );
+		DFEVar enableDslash = io.scalarInput("applyDslash", dfeBool() );
+		DFEVar enableClover = io.scalarInput("applyClover", dfeBool() );
+		DFEVar miscMode = io.scalarInput("miscMode", dfeBool());
+		DFEVar enableSecondOutput = io.scalarInput("enableOutput2", dfeBool());
+		DFEVar enableAxpyPre = io.scalarInput("enableAxpyPre", dfeBool());
+		DFEVar cloverDiagShift = io.scalarInput("cloverDiagShift", dfeUInt(5));
+		DFEVar cloverOffdiagShift = io.scalarInput("cloverOffdiagShift", dfeUInt(5));
+		DFEVar gaugeShift = io.scalarInput("gaugeShift", dfeUInt(5));
+
+		optimization.pushPipeliningFactor(0.1);
+		//counters that keep track of the phase of the kernel
+		CounterChain tickChain = control.count.makeCounterChain();
+		DFEVar tick = tickChain.addCounter(
+				constants.ticksPerSite *( (T+2)*LZ*LY*LX/2 + loopOffset ),
+				1);
+		debug.simPrintf(tick===0, "DFE Run start.\n");
+
+		//counters that keep track of the coordinates of the output sites
+		CounterChain coordChain = control.count.makeCounterChain();
+		DFEVar t = coordChain.addCounter(T+2, 1);
+		DFEVar z = coordChain.addCounter(LZ, 1);
+		DFEVar y = coordChain.addCounter(LY, 1);
+		DFEVar x = coordChain.addCounter(LX/2, 1);
+		DFEVar iter = (numPipes==16) ? constant.var(dfeUInt(1),0) : coordChain.addCounter(constants.ticksPerSite, 1);
+
+		CounterChain miscInputChain = control.count.makeCounterChain();
+		DFEVar miscInputCounter = miscInputChain.addCounter(3, 1);
+
+		DFEVar outputTickRange = tick >= outputTickRangeLower & tick < outputTickRangeUpper;
+		DFEVar cloverInputTickRange = tick >= outputTickRangeLower + 1 & tick < outputTickRangeUpper + 1;
+		optimization.popPipeliningFactor();
+
+		optimization.pushPipeliningFactor(0.0);
+		DFEVar inputEnableSpinor0 = miscMode===0 & iter===0 | miscMode===1;
+		DFEVar inputEnableSpinor1 =
+			miscMode===0 & enableAxpyPost & outputTickRange & iter===(constants.ticksPerSite-1) |
+			miscMode===0 & enableAxpyPre & inputEnableSpinor0 |
+			miscMode===1;
+		DFEVar inputEnableGauge = 	miscMode===0 & outputTickRange |
+									miscMode===1 & miscInputCounter===0;
+		DFEVar inputEnableClover =
+			miscMode===0 & ((~dagger & cloverInputTickRange /*outputTickRange*/ /*& iter===(constants.ticksPerSite-1)*/) |
+			(dagger /*& iter===0*/)) |
+			miscMode===1 & (miscInputCounter===0 | miscInputCounter===1);
+		DFEVar outputEnableSpinor0 =
+			miscMode===0 & outputTickRange & iter===(constants.ticksPerSite-1) |
+			miscMode===1;
+		DFEVar outputEnableSpinor1 =
+			miscMode===0 & enableSecondOutput & outputTickRange & iter===(constants.ticksPerSite-1) |
+			miscMode===1 & enableSecondOutput;
+		optimization.popPipeliningFactor();
+
+		DFEVector<DFEComplex> spinor_in0 = acio.input(
+				parameters.getName()+"_spinor_in",
+				LQCDConstants.getVectoredFixSpinorType(),
+				/*LMEM_BURST,*/
+				inputEnableSpinor0
+				);
+
+		DFEVector<DFEComplex> spinor_in1 = acio.input(
+				parameters.getName()+"_p_spinor_in",
+				LQCDConstants.getVectoredFixSpinorType(),
+				/*LMEM_BURST,*/
+				inputEnableSpinor1
+		);
+
+		DFEVector<DFEComplex> gauge_in = acio.input(
+				parameters.getName()+"_gauge",
+				LQCDConstants.getVectoredFixSu3Type(numPipes),
+				/*LMEM_BURST,*/
+				inputEnableGauge
+		);
+
+		DFEVector<DFEComplex> clover_in = acio.input(
+				parameters.getName()+"_clover",
+				LQCDConstants.getVectoredFixHalfCloverType(),
+				/*LMEM_BURST,*/
+				inputEnableClover
+		);
+
+		// Inputs are cast as structured data (spinors and gauges)
+		optimization.pushPipeliningFactor(.5);
+		DFESpinor inSpinor0 = DFESpinor.createSpinorFromEncoded(constants,
+				spinor_in0, inputCastType);
+		DFESpinor inSpinor1 = DFESpinor.createSpinorFromEncoded(constants,
+				spinor_in1, inputCastType);
+		DFESpinor inSpinor2 = DFESpinor.createSpinorFromEncoded(constants,
+				gauge_in, miscInputCounter, inputCastType);
+		DFESpinor inSpinor3 = DFESpinor.createSpinorFromEncodedHalfClover(constants,
+				clover_in, miscInputCounter, inputCastType);
+
+
+		System.out.println("inSpinor0 type = " + inSpinor0.getType().toString());
+		System.out.println("inSpinor1 type = " + inSpinor1.getType().toString());
+
+		System.out.println("shifted inSpinor1 type = " + inSpinor1.getType().toString());
+
+		DFESu3 gauges[] = new DFESu3[numPipes/2];
+		for (int i = 0; i < numPipes/2 ; i++ ) {
+			gauges[i] = new DFESu3(constants, gauge_in, gaugeShift, i, inputCastType);
+		}
+		optimization.popPipeliningFactor();
+
+		if(debugMode)
+		{
+			debug.simPrintf("== ( x=%d, y=%d, z=%d, t=%d )\n",
+				x, y, z, t);
+
+			debug.simPrintf(/*outputEnableSpinor0,*/ "inSpinor0: ( %f, %f )\n",
+				inSpinor0.s0.getC0().getReal(), inSpinor0.s0.getC0().getImaginary() );
+		}
+
+		optimization.pushPipeliningFactor(.5);
+		DFESpinorType axpyPreSpinorType = new DFESpinorType(constants,
+				inSpinor0.getType(), inSpinor1.getType());
+		AxpyNode axpyPre = new AxpyNode(constants, axpyPreSpinorType, axpyPreMultiplier.getType());
+		axpyPre.getMultiplier() <== axpyPreMultiplier;
+		axpyPre.getInputX() <== inSpinor0.castElements(axpyPreSpinorType);
+		axpyPre.getInputY() <== inSpinor1.castElements(axpyPreSpinorType);
+		optimization.popPipeliningFactor();
+
+		optimization.pushPipeliningFactor(0);
+		DFESpinorType axpyMuxPreSpinorType = new DFESpinorType(constants,
+				axpyPre.getOutput().getType(), inSpinor0.getType() );
+		DFESpinorMux axpyMuxPre = new DFESpinorMux(constants, axpyMuxPreSpinorType);
+		axpyMuxPre.getInputTrue() <== axpyPre.getOutput().castElements(axpyMuxPreSpinorType);
+		axpyMuxPre.getInputFalse() <== inSpinor0.castElements(axpyMuxPreSpinorType);;
+		axpyMuxPre.getDeterminator() <== enableAxpyPre;
+		DFESpinor axpyMuxPreOut = axpyMuxPre.getOutput();
+		optimization.popPipeliningFactor();
+
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "axpyMuxPreOut: ( %f, %f )\n",
+				axpyMuxPreOut.s0.getC0().getReal(), axpyMuxPreOut.s0.getC0().getImaginary() );
+		}
+
+		System.out.println("axpyMuxPreOut output type = " + axpyPre.getOutput().getType().toString());
+
+		System.out.println("axpyMuxPreOut type = " + axpyMuxPreOut.getType().toString());
+		System.out.println("axpyMuxPreOut real type = " + axpyMuxPreOut.getRealType());
+
+		DFEHalfClover cloverPre = new DFEHalfClover(constants, clover_in,
+				cloverDiagShift, cloverOffdiagShift, iter,
+				axpyMuxPreOut.getType(), axpyMuxPreOut.getRealType());
+		cloverPre.getInput() <==axpyMuxPreOut;
+
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "cloverPre out: ( %f, %f )\n",
+				cloverPre.getOutput().s0.getC0().getReal(), cloverPre.getOutput().s0.getC0().getImaginary() );
+		}
+
+		System.out.println("cloverPre output type = " + cloverPre.getOutput().getType().toString());
+		//We assume clovers do not change the values much, so downcasting should be safe
+		DFESpinor cloverPreCast = cloverPre.getOutput().castElements(axpyMuxPreOut.getType());
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "cloverPreCast: ( %f, %f )\n",
+				cloverPreCast.s0.getC0().getReal(), cloverPreCast.s0.getC0().getImaginary() );
+		}
+
+		System.out.println("cloverPre output cast type = " + cloverPreCast.getType().toString());
+
+		optimization.pushPipeliningFactor(0);
+		DFESpinorMux cloverMuxPre = new DFESpinorMux(constants, cloverPreCast.getType());
+		cloverMuxPre.getInputTrue() <== cloverPreCast;
+		cloverMuxPre.getInputFalse() <== axpyMuxPreOut.castElements(cloverPreCast.getType());
+		cloverMuxPre.getDeterminator() <== dagger & enableClover;
+		DFESpinor cloverMuxPreOut=cloverMuxPre.getOutput();
+		optimization.popPipeliningFactor();
+		System.out.println("cloverMuxPreOut type = " + cloverMuxPreOut.getType().toString());
+
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "cloverMuxPreOut: ( %f, %f )\n",
+				cloverMuxPreOut.s0.getC0().getReal(), cloverMuxPreOut.s0.getC0().getImaginary() );
+		}
+
+		//pipelining factors are handled inside Dslash!
+		Dslash dslash = new Dslash(constants,
+				x, y, z, t, iter,
+				ieo, dagger,
+				cloverMuxPreOut.getType(), gauges[0].getRealType()
+				);
+		for(int i=0; i<constants.numPipes/2; i++) { dslash.getGauges()[i] <== gauges[i]; }
+		dslash.getInput() <== cloverMuxPreOut;
+		System.out.println("dslash output type = " + dslash.getOutput().getType().toString());
+
+		optimization.pushPipeliningFactor(0.25);
+		DFESpinor dslashOut = dslash.getOutput();
+		DFEType maxTypeDslashOut=dslashOut.getRealType();
+		DFESpinor dslashOutCast = dslashOut.castElementsToMatch();
+		DFEVar outMaxDslash=dslashOutCast.getMaximum();
+		DFEFix outMaxDslashType = (DFEFix)outMaxDslash.getType();
+		DFEVar expShiftDslashOut=Bitops.onehotDecode(Bitops.leading1Detect(
+				outMaxDslash.cast(maxTypeDslashOut)))
+				.cast(dfeInt(6)) - outMaxDslashType.getFractionBits();
+		dslashOut = dslashOut.shift(-expShiftDslashOut.cast(dfeInt(6)));
+		dslashOut = dslashOut.castElements(inputCastType);
+		optimization.popPipeliningFactor();
+
+		DFESpinorType dslashMuxSpinorType = dslashOut.getType();
+
+		optimization.pushPipeliningFactor(0.1);
+		DFESpinorMux dslashMux = new DFESpinorMux(constants,
+				dslashMuxSpinorType   );
+		dslashMux.getInputTrue() <== dslashOut
+										.castElements(dslashMuxSpinorType);
+		dslashMux.getInputFalse() <== cloverMuxPreOut
+										.castElements(dslashMuxSpinorType);
+		dslashMux.getDeterminator() <== enableDslash;
+
+		DFESpinor dslashMuxOut = dslashMux.getOutput();
+		optimization.popPipeliningFactor();
+
+		//debug.popEnableNumericExceptions();
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "dslashMuxOut: ( %f, %f )\n",
+				dslashMuxOut.s0.getC0().getReal(), dslashMuxOut.s0.getC0().getImaginary() );
+		}
+
+		System.out.println("dslashMuxOut type = " + dslashMuxOut.getType().toString());
+
+		DFEHalfClover cloverPost = new DFEHalfClover(constants, clover_in,
+				cloverDiagShift, cloverOffdiagShift, ~iter,
+				dslashMuxOut.getType(),	dslashMuxOut.getRealType());
+		cloverPost.getInput() <== dslashMuxOut;
+
+		System.out.println("cloverPost output type = " + cloverPost.getOutput().getType().toString());
+
+		optimization.pushPipeliningFactor(0.1);
+		DFESpinorType cloverMuxPostSpinorType = new DFESpinorType(constants,
+				cloverPost.getOutput().getType(), dslashMuxOut.getType());
+		DFESpinorMux cloverMuxPost = new DFESpinorMux(constants, cloverMuxPostSpinorType);
+		cloverMuxPost.getInputTrue() <== cloverPost.getOutput().castElements(cloverMuxPostSpinorType);
+		cloverMuxPost.getInputFalse() <== dslashMuxOut.castElements(cloverMuxPostSpinorType);
+		cloverMuxPost.getDeterminator() <== outputEnableSpinor0 & ~dagger & enableClover;
+		DFESpinor cloverMuxPostOut = cloverMuxPost.getOutput();
+
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "cloverMuxPostOut: ( %f, %f )\n",
+				cloverMuxPostOut.s0.getC0().getReal(), cloverMuxPostOut.s0.getC0().getImaginary() );
+		}
+
+		System.out.println("cloverMuxPostOut type = " + cloverMuxPostOut.getType().toString());
+
+		DFESpinorMux miscMux12 = new DFESpinorMux(constants, inSpinor1.getRealType());
+		miscMux12.getInputTrue() <== inSpinor2;
+		miscMux12.getInputFalse() <== inSpinor1;
+		miscMux12.getDeterminator() <== miscMode;
+
+		System.out.println("miscMux12 output type = " + miscMux12.getOutput().getType().toString());
+
+		DFESpinorType miscMux03SpinorType = new DFESpinorType(constants,
+				inSpinor3.getType(), cloverMuxPostOut.getType() );
+		DFESpinorMux miscMux03 = new DFESpinorMux(constants, miscMux03SpinorType);
+		miscMux03.getInputTrue() <== inSpinor3.castElements(miscMux03SpinorType);
+		miscMux03.getInputFalse() <== cloverMuxPostOut.castElements(miscMux03SpinorType);
+		miscMux03.getDeterminator() <== miscMode;
+		optimization.popPipeliningFactor();
+
+		System.out.println("miscMux03 output type = " + miscMux03.getOutput().getType().toString());
+
+		optimization.pushPipeliningFactor(0.5);
+		DFESpinorType axpyPostSpinorType = new DFESpinorType(constants,
+				miscMux03.getOutput().getType(), miscMux12.getOutput().getType());
+		AxpyNode axpyPost = new AxpyNode(constants, axpyPostSpinorType,
+				axpyPostMultiplier.getType(), 3);
+		axpyPost.getMultiplier() <== axpyPostMultiplier;
+		axpyPost.getInputX() <== miscMux03.getOutput().castElements(axpyPostSpinorType);
+		axpyPost.getInputY() <== miscMux12.getOutput().castElements(axpyPostSpinorType);
+		optimization.popPipeliningFactor();
+
+		System.out.println("axpyPost output type = " + axpyPost.getOutput().getType().toString());
+
+		optimization.pushPipeliningFactor(0.1);
+		DFESpinorType axpyMuxPostSpinorType = new DFESpinorType(constants,
+				axpyPost.getOutput().getType(), cloverMuxPostOut.getType());
+		DFESpinorMux axpyMuxPost = new DFESpinorMux(constants, axpyMuxPostSpinorType);
+		axpyMuxPost.getInputTrue() <== axpyPost.getOutput().castElements(axpyMuxPostSpinorType);
+		axpyMuxPost.getInputFalse() <== cloverMuxPostOut.castElements(axpyMuxPostSpinorType);
+		axpyMuxPost.getDeterminator() <==
+				enableAxpyPost & outputTickRange & iter===(constants.ticksPerSite-1) |
+				enableAxpyPost & miscMode;
+		DFESpinor axpyMuxPostOut = axpyMuxPost.getOutput();
+		optimization.popPipeliningFactor();
+
+		if(debugMode)
+		{
+			debug.simPrintf(/*outputEnableSpinor0,*/ "axpyMuxPostOut: ( %f, %f )\n",
+				axpyMuxPostOut.s0.getC0().getReal(), axpyMuxPostOut.s0.getC0().getImaginary() );
+		}
+
+		System.out.println("axpyMuxPostOut type = " + axpyMuxPostOut.getType().toString());
+
+		optimization.pushFixOpMode(Optimization.bitSizeExact(64),
+				Optimization.offsetExact(-32), MathOps.ADD);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(64),
+				Optimization.offsetExact(-32), MathOps.MUL);
+		optimization.pushPipeliningFactor(0.75);
+		DFEVar thisSpinorSq = axpyMuxPostOut.normSq();
+		optimization.popPipeliningFactor();
+		optimization.popFixOpMode(MathOps.MUL);
+		optimization.popFixOpMode(MathOps.ADD);
+
+
+		thisSpinorSq = outputEnableSpinor0 ? thisSpinorSq : 0;
+
+		System.out.println("thisSpinorSq type = " + thisSpinorSq.getType().toString());
+
+		DFEVar outSqExpShift=dfeInt(7).newInstance(this);
+		DFEVar currOutSqExpShift = axpyMuxPostOut.m_shift;
+
+		outSqExpShift <== (miscMode===0 & tick===outputTickRangeLower+constants.ticksPerSite-1
+							| miscMode===1 & tick===0) ?
+			currOutSqExpShift :
+			stream.offset(outSqExpShift, -1);
+		DFEVar thisSpinorSqExpDiff = outSqExpShift - currOutSqExpShift;
+		DFEVar thisSpinorSqExpDiffAbs = KernelMath.abs(thisSpinorSqExpDiff).cast(dfeUInt(6));
+		DFEVar thisSpinorSqShifted = thisSpinorSqExpDiff > 0 ?
+				thisSpinorSq >> 2*thisSpinorSqExpDiffAbs :
+				thisSpinorSq << 2*thisSpinorSqExpDiffAbs ;
+
+		DFEType accumulatorType = dfeFixOffset(64, -32, SignMode.UNSIGNED);
+		DFEVar accumulator = accumulatorType.newInstance(constants.getKernel());
+
+		DFEVar addend1 = (tick===0) ? constant.var(accumulatorType, 0.)
+				: stream.offset(accumulator, -1);
+
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+				Optimization.offsetLargestMsb(), MathOps.ADD);
+		accumulator <== addend1 + thisSpinorSqShifted.cast(accumulatorType);
+		optimization.popFixOpMode(MathOps.ADD);
+
+		optimization.pushPipeliningFactor(0.75);
+		DFEType maxType0=axpyMuxPostOut.getRealType();
+		DFESpinor outSpinor3cast = axpyMuxPostOut.castElementsToMatch();
+		DFEVar outMax0=outSpinor3cast.getMaximum();
+		DFEFix outMax0Type = (DFEFix)outMax0.getType();
+		DFEVar expShift0=Bitops.onehotDecode(Bitops.leading1Detect(outMax0.cast(maxType0)))
+				.cast(dfeInt(6)) - outMax0Type.getFractionBits()/* - 1*/;
+		DFEType maxType1=axpyMuxPreOut.getRealType();
+		DFESpinor kAfterPrePcast = axpyMuxPreOut.castElementsToMatch();
+		DFEVar outMax1=kAfterPrePcast.getMaximum();
+		DFEFix outMax1Type = (DFEFix)outMax1.getType();
+		DFEVar expShift1=Bitops.onehotDecode(Bitops.leading1Detect(outMax1.cast(maxType1)))
+				.cast(dfeInt(6)) - outMax1Type.getFractionBits()/* - 1*/;
+
+		System.out.println("outSpinor3cast type = " + outSpinor3cast.getType().toString());
+		System.out.println("kAfterPrePcast type = " + kAfterPrePcast.getType().toString());
+
+		System.out.println("outMax0 type = " + outMax0.getType().toString());
+
+		System.out.println("outMax0 fraction bits = " + outMax0Type.getFractionBits());
+
+		DFESpinor outSpinor0Shifted = axpyMuxPostOut.shift(-expShift0.cast(dfeInt(6)));
+		DFESpinor outSpinor1Shifted = axpyMuxPreOut.shift(-expShift1.cast(dfeInt(6)));
+
+		System.out.println("outSpinor0Shifted type = " + outSpinor0Shifted.getType().toString());
+		System.out.println("outSpinor1Shifted type = " + outSpinor1Shifted.getType().toString());
+
+
+		DFEVector<DFEComplex> spinor_out0_enc = outSpinor0Shifted
+								.convertToDFEVectorWithEncoding(outSpinor0Shifted.m_shift);
+		DFEVector<DFEComplex> spinor_out1_enc = outSpinor1Shifted
+								.convertToDFEVectorWithEncoding(outSpinor1Shifted.m_shift);
+		optimization.popPipeliningFactor();
+
+		io.scalarOutput("outSq", accumulator.cast(dfeRawBits(64)).cast(dfeUInt(64)), dfeUInt(64));
+		io.scalarOutput("outSqShift", outSqExpShift.cast(dfeInt(64)).cast(dfeUInt(64)), dfeUInt(64));
+
+		acio.output(
+				parameters.getName()+"_spinor0_out",
+				spinor_out0_enc,
+				/*384*8,*/
+				outputEnableSpinor0
+				);
+
+		acio.output(
+				parameters.getName()+"_spinor1_out",
+				spinor_out1_enc,
+				/*384*8,*/
+				outputEnableSpinor1
+				);
+	}
+
+}

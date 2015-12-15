@@ -1,0 +1,513 @@
+package lqcd;
+
+import java.util.List;
+
+import com.maxeler.maxcompiler.v2.errors.MaxCompilerAPIError;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.DoubtType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.KernelObject;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.KernelType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructDoubtType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+/**
+ * Represents a 3-dimensional vector of complex numbers.
+ * Implements KernelObject.
+ * @author Bas Kwaadgras and Siavash Zangeneh
+ */
+public class DFESu3Vector extends KernelLib
+	implements KernelObject<DFESu3Vector>
+{
+	private final LQCDConstants m_constants;
+	public final int m_numBits, m_max;
+	private final DFESu3VectorType m_type;
+	private final DFEStruct m_vec_data;
+
+	protected DFESu3Vector(LQCDConstants constants, DFEStruct data, DFESu3VectorType type)
+	{
+		super(constants.getKernel());
+		m_constants = constants;
+		m_numBits = type.getC0Type().getRealType().getTotalBits();
+		m_max=-1;
+		m_type = type;
+		m_vec_data = data;
+	}
+
+	public DFEComplex getC0()
+	{
+		return m_vec_data.get("c0");
+	}
+	public DFEComplex setC0(DFEComplex src)
+	{
+		return m_vec_data.set("c0", src);
+	}
+	public DFEComplex getC1()
+	{
+		return m_vec_data.get("c1");
+	}
+	public DFEComplex setC1(DFEComplex src)
+	{
+		return m_vec_data.set("c1", src);
+	}
+	public DFEComplex getC2()
+	{
+		return m_vec_data.get("c2");
+	}
+	public DFEComplex setC2(DFEComplex src)
+	{
+		return m_vec_data.set("c2", src);
+	}
+
+	/**
+	 * Sets all the vector elements to zero
+	 */
+	protected void setZero() {
+		DFEComplexType c0Type = m_type.getC0Type();
+		DFEComplexType c1Type = m_type.getC1Type();
+		DFEComplexType c2Type = m_type.getC2Type();
+		setC0(DFEComplexType.newInstance(m_constants.getKernel(),
+			constant.var((DFEType)c0Type.getRealType(), 0),
+			constant.var((DFEType)c0Type.getImaginaryType(), 0))
+		);
+		setC1(DFEComplexType.newInstance(m_constants.getKernel(),
+			constant.var((DFEType)c1Type.getRealType(), 0),
+			constant.var((DFEType)c1Type.getImaginaryType(), 0))
+		);
+		setC2(DFEComplexType.newInstance(m_constants.getKernel(),
+			constant.var((DFEType)c2Type.getRealType(), 0),
+			constant.var((DFEType)c2Type.getImaginaryType(), 0))
+		);
+	}
+
+	/**
+	 * Connects the su3vector to another su3vector
+	 * @param a the su3vector to connect to
+	 * @return
+	 */
+	@Override
+	public DFESu3Vector connect (DFESu3Vector a) {
+		m_vec_data.connect(a.m_vec_data);
+		return this;
+	}
+
+	public DFESu3Vector castElements(DFEType toCastTo)
+	{
+		DFEComplexType cplxTypeToCastTo = new DFEComplexType(toCastTo);
+
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().cast(cplxTypeToCastTo),
+				getC1().cast(cplxTypeToCastTo),
+				getC2().cast(cplxTypeToCastTo)
+				);
+	}
+
+	public DFESu3Vector castElements(DFESu3VectorType toCastTo)
+	{
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().cast(toCastTo.getC0Type()),
+				getC1().cast(toCastTo.getC1Type()),
+				getC2().cast(toCastTo.getC2Type())
+				);
+	}
+
+	/**
+	 * su3vector addition
+	 * @param a the su3vector addend
+	 * @return the resulting su3vector sum
+	 */
+	DFESu3Vector add (DFESu3Vector a) {
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().add(a.getC0()),
+				getC1().add(a.getC1()),
+				getC2().add(a.getC2()));
+	}
+
+	/**
+	 * su3vector subtraction
+	 * @param a the su3vector subtrahend
+	 * @return the resulting su3vector difference
+	 */
+	DFESu3Vector sub (DFESu3Vector a) {
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().sub(a.getC0()),
+				getC1().sub(a.getC1()),
+				getC2().sub(a.getC2()));
+	}
+
+	/**
+	 * Multiply by a real number
+	 * @param a the real multiplicand
+	 * @return the resulting su3vector product
+	 */
+	DFESu3Vector mul (DFEVar a) {
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().mul(a),
+				getC1().mul(a),
+				getC2().mul(a));
+	}
+
+	/**
+	 * Multiply by a complex number
+	 * @param a the complex multiplicand
+	 * @return the resulting su3vector product
+	 */
+	DFESu3Vector mul (DFEComplex a) {
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().mul(a),
+				getC1().mul(a),
+				getC2().mul(a));
+	}
+
+	/**
+	 * Multiply by the conjugate of a complex number
+	 * @param a the complex multiplicand
+	 * @return the resulting su3vector product
+	 */
+	DFESu3Vector times_complexcjg (DFEComplex a) {
+		DFEComplex a_con=a.conjugate();
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0().mul(a_con),
+				getC1().mul(a_con),
+				getC2().mul(a_con));
+	}
+
+	/**
+	 * Multiplies the su3vector by I, the imaginary unit
+	 * @return the su3vector multiplied by I
+	 */
+	DFESu3Vector mult_i ()
+	{
+		return DFESu3VectorType.newInstance(m_constants,
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					-getC0().getImaginary(), getC0().getReal() ),
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					-getC1().getImaginary(), getC1().getReal() ),
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					-getC2().getImaginary(), getC2().getReal() )
+		);
+
+	}
+
+	/**
+	 * Multiplies the su3vector by -I, where I is the imaginary unit
+	 * @return the su3vector multiplied by -I
+	 */
+	DFESu3Vector mult_mi ()
+	{
+		return DFESu3VectorType.newInstance(m_constants,
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					getC0().getImaginary(), -getC0().getReal() ),
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					getC1().getImaginary(), -getC1().getReal() ),
+			DFEComplexType.newInstance(m_constants.getKernel(),
+					getC2().getImaginary(), -getC2().getReal() )
+		);
+
+	}
+
+	/**
+	 * Duplicates the su3vector
+	 * @return the new object of same data
+	 */
+	DFESu3Vector duplicate () {
+		return DFESu3VectorType.newInstance(m_constants,
+				getC0(),
+				getC1(),
+				getC2());
+	}
+
+	/**
+	 * Negate each element of this su3vector
+	 * @return the negation of the su3vector
+	 */
+	DFESu3Vector neg () {
+		return DFESu3VectorType.newInstance(m_constants,
+				-getC0(),
+				-getC1(),
+				-getC2());
+	}
+
+	/**
+	 * Multiply by 2
+	 * @return 2*this su3vector
+	 */
+	DFESu3Vector multBy2 () {
+		return DFESu3VectorType.newInstance(m_constants,
+				2*getC0(),
+				2*getC1(),
+				2*getC2());
+	}
+
+	DFEVar findAbsMax()
+	{
+		DFEVar a=KernelMath.max(
+				KernelMath.abs(getC0().getReal()), KernelMath.abs(getC0().getImaginary())
+		);
+		DFEVar b=KernelMath.max(
+				KernelMath.abs(getC1().getReal()), KernelMath.abs(getC1().getImaginary())
+		);
+		DFEVar c=KernelMath.max(
+				KernelMath.abs(getC2().getReal()), KernelMath.abs(getC2().getImaginary())
+		);
+		return KernelMath.max(a, KernelMath.max(b, c));
+	}
+
+	/**
+	 * Works the same as streamoffset for DFEVars, except that it is defined for DFESu3Vectors
+	 * @param offset integer offset
+	 * @return the object holding the offsetted su3vector
+	 */
+	public DFESu3Vector streamoffset(int offset) {
+		return DFESu3VectorType.newInstance(m_constants,
+				stream.offset(getC0(), offset),
+				stream.offset(getC1(), offset),
+				stream.offset(getC2(), offset)
+				);
+	}
+
+	public DFESu3Vector shift(DFEVar shiftBy, DFEVar shiftLeft)
+	{
+		DFESu3Vector retShiftLeft=DFESu3VectorType.newInstance(m_constants,
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC0().getReal() << shiftBy,
+					getC0().getImaginary() << shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC1().getReal() << shiftBy,
+					getC1().getImaginary() << shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC2().getReal() << shiftBy,
+					getC2().getImaginary() << shiftBy
+				)
+		);
+		DFESu3Vector retShiftRight=DFESu3VectorType.newInstance(m_constants,
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC0().getReal() >> shiftBy,
+					getC0().getImaginary() >> shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC1().getReal() >> shiftBy,
+					getC1().getImaginary() >> shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC2().getReal() >> shiftBy,
+					getC2().getImaginary() >> shiftBy
+				)
+		);
+		return (new DFEQCDSelector(m_constants, shiftLeft)) ?
+				retShiftLeft : retShiftRight;
+	}
+
+	public DFESu3Vector shiftRight(DFEVar shiftBy)
+	{
+		if(((DFEFix)shiftBy.getType()).getSignMode()!=SignMode.UNSIGNED)
+		{
+			throw new RuntimeException(
+					"shiftRight only takes unsigned integers!");
+		}
+
+		if(shiftBy.getType().getTotalBits() > 5)
+		{
+			shiftBy = KernelMath.min(shiftBy, constant.var(shiftBy.getType(), 31));
+			shiftBy = shiftBy.cast(dfeUInt(5));
+		}
+
+		return DFESu3VectorType.newInstance(m_constants,
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC0().getReal() >> shiftBy,
+					getC0().getImaginary() >> shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC1().getReal() >> shiftBy,
+					getC1().getImaginary() >> shiftBy
+				),
+				DFEComplexType.newInstance(m_constants.getKernel(),
+					getC2().getReal() >> shiftBy,
+					getC2().getImaginary() >> shiftBy
+				)
+		);
+	}
+
+	public void checkSizes()
+	{
+		debug.simPrintf(
+				getC0().getReal() >= constant.var(getC0().getReal().getType(), 2) |
+				getC0().getReal() <= constant.var(getC0().getReal().getType(), -2),
+				"found too big value: %f\n", getC0().getReal() );
+		debug.simPrintf(
+				getC0().getImaginary() >= constant.var(getC0().getImaginary().getType(), 2) |
+				getC0().getImaginary() <= constant.var(getC0().getImaginary().getType(), -2),
+				"found too big value: %f\n", getC0().getImaginary() );
+		debug.simPrintf(
+				getC1().getReal() >= constant.var(getC1().getReal().getType(), 2) |
+				getC1().getReal() <= constant.var(getC1().getReal().getType(), -2),
+				"found too big value: %f\n", getC1().getReal() );
+		debug.simPrintf(
+				getC1().getImaginary() >= constant.var(getC1().getImaginary().getType(), 2) |
+				getC1().getImaginary() <= constant.var(getC1().getImaginary().getType(), -2),
+				"found too big value: %f\n", getC1().getImaginary() );
+		debug.simPrintf(
+				getC2().getReal() >= constant.var(getC2().getReal().getType(), 2) |
+				getC2().getReal() <= constant.var(getC2().getReal().getType(), -2),
+				"found too big value: %f\n", getC2().getReal() );
+		debug.simPrintf(
+				getC2().getImaginary() >= constant.var(getC2().getImaginary().getType(), 2) |
+				getC2().getImaginary() <= constant.var(getC2().getImaginary().getType(), -2),
+				"found too big value: %f\n", getC2().getImaginary() );
+	}
+
+
+	/**
+	 * converts the su3vector to a vector of complex numbers, suitable for output ports
+	 * @return the vectored su3vector
+	 */
+	public DFEVector<DFEComplex> convertToDFEVector () {
+		DFEVector<DFEComplex> result =
+			LQCDConstants.getVectoredSu3VectorType().newInstance(m_constants);
+
+		result[0]  <== getC0().cast(LQCDConstants.complexTypeComputeOld);
+		result[1]  <== getC1().cast(LQCDConstants.complexTypeComputeOld);
+		result[2]  <== getC2().cast(LQCDConstants.complexTypeComputeOld);
+
+		return result;
+	}
+
+	public DFEVar normSq() {
+
+		return 	(getC0().getReal()*getC0().getReal() + getC0().getImaginary()*getC0().getImaginary()) +
+				(getC1().getReal()*getC1().getReal() + getC1().getImaginary()*getC1().getImaginary()) +
+				(getC2().getReal()*getC2().getReal() + getC2().getImaginary()*getC2().getImaginary());
+
+	}
+
+	@Override
+	public KernelObject<?> cast(KernelType<?> type) {
+		if(type instanceof DFESu3VectorType)
+		{
+			return castElements((DFESu3VectorType)type);
+		}
+		if(type instanceof DFEType)
+		{
+			return castElements((DFEType)type);
+		}
+
+		throw new MaxCompilerAPIError(getKernel().getManager(),
+					"Cannot cast a DFESu3Vector using type: " + type);
+	}
+
+	@Override
+	public DFESu3Vector castDoubtType(DoubtType doubt_type) {
+		if(!(doubt_type instanceof DFESu3VectorDoubtType))
+			throw new MaxCompilerAPIError(getKernel().getManager(),
+				"Can only doubt-type cast DFESu3Vector using DFESu3VectorDoubtType object.");
+
+		DFEStructDoubtType struct_doubt_type =
+			((DFESu3VectorDoubtType)doubt_type).getDFEStructDoubtType();
+
+		return new DFESu3Vector(m_constants,
+			m_vec_data.castDoubtType(struct_doubt_type),
+			m_type);
+	}
+
+	@Override
+	public DFESu3Vector simWatch(String name) {
+		getC0().simWatch(name + "_c0");
+		getC1().simWatch(name + "_c0");
+		getC2().simWatch(name + "_c0");
+		return this;
+	}
+
+	@Override
+	@Deprecated
+	public DFESu3Vector watch(String name) {
+		return simWatch(name);
+	}
+
+	@Override
+	public DFESu3VectorType getType() {
+		return m_type;
+	}
+
+	@Override
+	public DFEVar pack() {
+		if(!getType().isConcreteType())
+			throw new MaxCompilerAPIError(getKernel().getManager(),
+				"Cannot pack DFESu3Vector as type " + getType() + " is not concrete.");
+
+		return m_vec_data.pack();
+	}
+
+	@Override
+	public DFEVar packWithoutDoubt() {
+		return m_vec_data.packWithoutDoubt();
+	}
+
+	@Override
+	public DFEVar packWithDoubt() {
+		return m_vec_data.packWithDoubt();
+	}
+
+	@Override
+	public void setReportOnUnused(boolean v) {
+		m_vec_data.setReportOnUnused(v);
+	}
+
+	@Override
+	public List<DFEVar> packToList() {
+		return this.m_vec_data.packToList();
+	}
+
+	@Override
+	public DFEVar hasDoubt() {
+		return m_vec_data.hasDoubt();
+	}
+
+	@Override
+	public DFESu3Vector setDoubt(DFEVar doubt) {
+		return setDoubt(doubt, SetDoubtOperation.OVERRIDE);
+	}
+
+	@Override
+	public DFESu3Vector setDoubt(boolean doubt) {
+		return setDoubt(doubt, SetDoubtOperation.OVERRIDE);
+	}
+
+	@Override
+	public DFESu3Vector setDoubt(DFEVar doubt, SetDoubtOperation operation) {
+		if (!getDoubtType().hasDoubtInfo())
+			throw new MaxCompilerAPIError(getKernel().getManager(),
+				"Cannot use setDoubt on this stream as it doesn't contain doubt information.");
+		return new DFESu3Vector(
+				m_constants, m_vec_data.setDoubt(doubt, operation), m_type);
+	}
+
+	@Override
+	public DFESu3Vector setDoubt(boolean doubt, SetDoubtOperation operation) {
+		return setDoubt(getKernel().constant.var(doubt), operation);
+	}
+
+	@Override
+	public DFESu3VectorDoubtType getDoubtType() {
+		return new DFESu3VectorDoubtType(m_vec_data.getDoubtType());
+	}
+
+
+	@Override
+	public DFESu3Vector addDoubtInfo() {
+		return castDoubtType( getType().getFullTypeWithDoubtInfo().getDoubtType() );
+	}
+
+	@Override
+	public DFESu3Vector removeDoubtInfo() {
+		return castDoubtType( getType().getFullTypeWithoutDoubtInfo().getDoubtType() );
+	}
+}

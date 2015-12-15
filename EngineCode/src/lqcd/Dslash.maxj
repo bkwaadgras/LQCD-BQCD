@@ -1,0 +1,464 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+
+/**
+ * The Dslash operator.
+ * Note: currently the only number of pipes supported is 8
+ * @author Bas Kwaadgras
+ *
+ */
+public class Dslash extends KernelLib {
+
+	private final int m_numPipes, m_ticksPerSite;
+	private final LQCDConstants m_constants;
+	private final int m_LZ,m_LY,m_LX;
+	private final DFEVar m_x, m_y, m_z, m_t;
+	private final DFEVar m_iter;
+	private final DFEVar m_ieo, m_dagger;
+	private final DFESpinor inSpinor;
+	private final DFESpinor outSpinor;
+	private final DFESu3[] inGauges;
+
+	protected Dslash(LQCDConstants constants,
+			DFEVar x, DFEVar y, DFEVar z, DFEVar t, DFEVar iter,
+			DFEVar ieo, DFEVar dagger,
+			DFEType realTypeSpinor, DFEType realTypeGauge) {
+		super(constants.getKernel());
+		DFESpinorType spinorType = new DFESpinorType(constants,
+			new DFEComplexType(realTypeSpinor));
+		m_constants = constants;
+		m_numPipes = constants.numPipes;
+		m_LX = constants.LX;
+		m_LY = constants.LY;
+		m_LZ = constants.LZ;
+		m_ticksPerSite = constants.ticksPerSite;
+		m_x=x;
+		m_y=y;
+		m_z=z;
+		m_t=t;
+		m_iter=iter;
+		m_ieo=ieo;
+		m_dagger=dagger;
+
+		inSpinor = spinorType.newInstance(constants.getKernel());
+		inGauges = new DFESu3[m_numPipes/2];
+		for(int i=0; i<m_numPipes/2; i++)
+		{
+			inGauges[i] = DFESu3.createInstance(constants, realTypeGauge);
+		}
+		outSpinor = applyDslash(inSpinor, inGauges);
+	}
+
+	protected Dslash(LQCDConstants constants,
+			DFEVar x, DFEVar y, DFEVar z, DFEVar t, DFEVar iter,
+			DFEVar ieo, DFEVar dagger,
+			DFESpinorType spinorType, DFEType realTypeGauge) {
+		super(constants.getKernel());
+		m_constants = constants;
+		m_numPipes = constants.numPipes;
+		m_LX = constants.LX;
+		m_LY = constants.LY;
+		m_LZ = constants.LZ;
+		m_ticksPerSite = constants.ticksPerSite;
+		m_x=x;
+		m_y=y;
+		m_z=z;
+		m_t=t;
+		m_iter=iter;
+		m_ieo=ieo;
+		m_dagger=dagger;
+
+		inSpinor = spinorType.newInstance(constants.getKernel());
+		inGauges = new DFESu3[m_numPipes/2];
+		for(int i=0; i<m_numPipes/2; i++)
+		{
+			inGauges[i] = DFESu3.createInstance(constants, realTypeGauge);
+		}
+		outSpinor = applyDslash(inSpinor, inGauges);
+	}
+
+
+	DFESu3 [] getGauges()
+	{
+		return inGauges;
+	}
+	DFESpinor getInput()
+	{
+		return inSpinor;
+	}
+	DFESpinor getOutput()
+	{
+		return outSpinor;
+	}
+
+
+	/**
+	 * This function applies dslash to spinor k.
+	 * @param k Spinor stream to apply dslash to
+	 * @param gauges Gauges needed for dslash
+	 * @param x, y, z, t Current x, y, z, t site location
+	 * @param iter Current iteration, i.e., number of ticks already spent on this site
+	 * @return Resulting spinor
+	 */
+	public DFESpinor applyDslash(DFESpinor k, DFESu3[] gauges) {
+
+		optimization.pushPipeliningFactor(0);
+		DFEQCDSelector isEvenRow = new DFEQCDSelector(m_constants,
+				/*((m_t-1))[0] ^ m_z[0] ^ m_y[0] ^ (~m_ieo) );*/
+				((m_t+1))[0] ^ m_z[0] ^ m_y[0] ^ (~m_ieo) );
+		//it doesn't matter for the lsb if we do + or - 1 (and - can give overflow)
+		optimization.popPipeliningFactor();
+
+		optimization.pushPipeliningFactor(0.1);
+		DFEQCDSelector xFOffSelector = new DFEQCDSelector(m_constants, m_x===m_LX/2-1);
+		DFEQCDSelector xBOffSelector = new DFEQCDSelector(m_constants, m_x===0);
+		DFEQCDSelector yFOffSelector = new DFEQCDSelector(m_constants, m_y===m_LY-1);
+		DFEQCDSelector yBOffSelector = new DFEQCDSelector(m_constants, m_y===0);
+		DFEQCDSelector zFOffSelector = new DFEQCDSelector(m_constants, m_z===m_LZ-1);
+		DFEQCDSelector zBOffSelector = new DFEQCDSelector(m_constants, m_z===0);
+		optimization.popPipeliningFactor();
+
+
+
+		DFESpinor xFSpinor = isEvenRow ?
+				k :
+				( xFOffSelector ? k.streamoffset((1-m_LX/2)*m_ticksPerSite) : k.streamoffset(1*m_ticksPerSite) );
+
+
+		DFESpinor xBSpinor = isEvenRow ?
+				( xBOffSelector ? k.streamoffset((m_LX/2-1)*m_ticksPerSite) : k.streamoffset(-1*m_ticksPerSite) ) :
+				k;
+
+		DFESpinor yFSpinor = yFOffSelector ? k.streamoffset((1-m_LY)*(m_LX/2)*m_ticksPerSite) : k.streamoffset((m_LX/2)*m_ticksPerSite);
+
+		DFESpinor yBSpinor = yBOffSelector ? k.streamoffset((m_LY-1)*(m_LX/2)*m_ticksPerSite) : k.streamoffset((-m_LX/2)*m_ticksPerSite);
+
+		DFESpinor zFSpinor = zFOffSelector ? k.streamoffset((1-m_LZ)*m_LY*(m_LX/2)*m_ticksPerSite) : k.streamoffset(m_LY*(m_LX/2)*m_ticksPerSite);
+
+		DFESpinor zBSpinor = zBOffSelector ? k.streamoffset((m_LZ-1)*m_LY*(m_LX/2)*m_ticksPerSite) : k.streamoffset(-m_LY*(m_LX/2)*m_ticksPerSite);
+
+		//since the stream starts at t=-1 (which is equivalent to t=LT-1) and runs all the way through
+		//t=LT (as opposed to 0 through LT-1), the t direction does not need a mux
+		DFESpinor tFSpinor = k.streamoffset(m_LZ*m_LY*(m_LX/2)*m_ticksPerSite);
+		DFESpinor tBSpinor = k.streamoffset(-m_LZ*m_LY*(m_LX/2)*m_ticksPerSite);
+
+		optimization.pushPipeliningFactor(0);
+		DFEVar outputSpinorShift = m_iter ?
+				KernelMath.max(
+					KernelMath.max(zBSpinor.m_shift, zFSpinor.m_shift),
+					KernelMath.max(tBSpinor.m_shift, tFSpinor.m_shift)
+				) :
+				KernelMath.max(
+					KernelMath.max(xBSpinor.m_shift, xFSpinor.m_shift),
+					KernelMath.max(yBSpinor.m_shift, yFSpinor.m_shift)
+				);
+		optimization.popPipeliningFactor();
+		/*debug.simPrintf("outputSpinorShift = %d\n", outputSpinorShift);
+		debug.simPrintf("xB shift = %d ", xBSpinor.m_shift);
+		debug.simPrintf("xF shift = %d\n", xFSpinor.m_shift);
+		debug.simPrintf("yB shift = %d ", yBSpinor.m_shift);
+		debug.simPrintf("yF shift = %d\n", yFSpinor.m_shift);
+		debug.simPrintf("zB shift = %d ", zBSpinor.m_shift);
+		debug.simPrintf("zF shift = %d\n", zFSpinor.m_shift);
+		debug.simPrintf("tB shift = %d ", tBSpinor.m_shift);
+		debug.simPrintf("tF shift = %d\n", tFSpinor.m_shift);*/
+
+		DFESpinor outputSpinor = k.getType().newZeroInstance(m_constants, outputSpinorShift);
+
+		DFEVar numPipes_ = constant.var(dfeUInt(MathUtils.bitsToRepresent(m_numPipes)),m_numPipes);
+
+		for(int i=0; i<m_numPipes; i++)
+		{
+
+			DFEVar i_ = constant.var( dfeUInt( MathUtils.bitsToRepresent(m_numPipes)), i);
+
+			optimization.pushPipeliningFactor(0.1);
+			DFEVar globalI=(m_iter.cast(dfeUInt(4))*numPipes_ + i_.cast(dfeUInt(4))).cast(dfeUInt(4));
+			optimization.popPipeliningFactor();
+
+			optimization.pushPipeliningFactor(0);
+			DFEVar j=globalI[0];
+			DFEVar dir=globalI[1];
+			DFEVar neighbourID = globalI.slice(1, 3).cast(dfeUInt(3));
+			DFEVar axis= neighbourID.slice(1, 2).cast(dfeUInt(2));
+			optimization.popPipeliningFactor();
+
+			DFEQCDSelector neighbourSelector = new DFEQCDSelector(m_constants, neighbourID);
+
+			optimization.pushPipeliningFactor(0.1);
+			DFESpinor currNeighbour=neighbourSelector.mux(
+					xBSpinor, xFSpinor,
+					yBSpinor, yFSpinor,
+					zBSpinor, zFSpinor,
+					tBSpinor, tFSpinor
+			);
+
+			DFEVar expDiff = (outputSpinorShift - currNeighbour.m_shift).cast(
+					dfeUInt(6));
+
+			System.out.println("Dslash - currNeighbour type = "
+					+ currNeighbour.getType().toString());
+
+			DFESu3 currGauge=gauges[i/2].transpose();
+			optimization.popPipeliningFactor();
+			System.out.println("Dslash - currGauge[00] type = "
+					+ currGauge.c00.getType().toString());
+
+			debug.simPrintf(j, "Neighbour %d: (%f, %f), shifted by %d\n", neighbourID,
+					currNeighbour.s0.getC0().getReal(), currNeighbour.s0.getC0().getImaginary(),
+					currNeighbour.m_shift);
+
+			debug.simPrintf(j, "Curr gauge: (%f, %f)\n",
+					currGauge.c00.getReal(), currGauge.c00.getImaginary() );
+
+
+			optimization.pushPipeliningFactor(0);
+			DFEQCDSelector jIsZeroSelector = new DFEQCDSelector(m_constants, j===0);
+			DFEQCDSelector jIsOneSelector = new DFEQCDSelector(m_constants, j===1);
+			DFEQCDSelector bSelector = new DFEQCDSelector(m_constants,
+					(axis===2 & j===1) | ((axis===0 | axis===1) & j===0 ));
+			optimization.popPipeliningFactor();
+
+			optimization.pushPipeliningFactor(0.1);
+			DFESu3Vector a=jIsZeroSelector ? currNeighbour.s0 : currNeighbour.s1;
+			DFESu3Vector b=bSelector ? currNeighbour.s3 : currNeighbour.s2;
+			optimization.popPipeliningFactor();
+
+			optimization.pushPipeliningFactor(0);
+			DFEVar bMin= axis===0 ? dir : j ^ dir;
+			//The reasoning for bMin is:
+			//In the x-direction, we should have: false, false, true, true
+			//In the y-direction, we should have: false, true, true, false
+			//In the z-direction, we should have: false, true, true, false
+			//In the t-direction, it doesn't matter
+
+			DFEVar bMinXORdagger = (bMin ^ m_dagger===1);
+			DFEVar axisIsOne = (axis===1);
+			DFEVar psiMin = (bMin ^ m_dagger===1 ^ axis===1);
+
+			DFEQCDSelector bMinSelector = new DFEQCDSelector(m_constants, bMinXORdagger);
+			DFEQCDSelector axisIsOneSelector = new DFEQCDSelector(m_constants, axisIsOne);
+			DFEQCDSelector psiMinSelector = new DFEQCDSelector(m_constants, psiMin);
+			DFEQCDSelector tSelector = new DFEQCDSelector(m_constants, axis===3);
+			DFEQCDSelector tLowerHalfSelector = new DFEQCDSelector(m_constants,~(m_dagger ^ dir));
+			DFEQCDSelector addToS0Selector = new DFEQCDSelector(m_constants,
+					j===0 & ((m_dagger === 0 & dir===0) | (m_dagger===1 & dir===1))  );
+			DFEQCDSelector addToS1Selector = new DFEQCDSelector(m_constants,
+					j===1 & ((m_dagger === 0 & dir===0) | (m_dagger===1 & dir===1))  );
+			DFEQCDSelector addToS2Selector = new DFEQCDSelector(m_constants,
+					j===0 & ((m_dagger === 0 & dir===1) | (m_dagger===1 & dir===0))  );
+			DFEQCDSelector addToS3Selector = new DFEQCDSelector(m_constants,
+					j===1 & ((m_dagger === 0 & dir===1) | (m_dagger===1 & dir===0))  );
+
+			DFEVar bMinI = (bMinXORdagger.cast(dfeRawBits(1))
+							.cat(axisIsOne.cast(dfeRawBits(1)))).cast(dfeUInt(2));
+			DFEQCDSelector bMinISelector = new DFEQCDSelector(m_constants, bMinI);
+			optimization.popPipeliningFactor();
+			//3 = 11 : bMinXORdagger & axisIsOne
+			//2 = 10 : bMinXORdagger & ~axisIsOne
+			//1 = 01 : ~bMinXORdagger & axisIsOne
+			//0 = 00 : ~bMinXORdagger & ~axisIsOne
+			optimization.pushPipeliningFactor(0.1);
+			b=bMinISelector.mux(b.mult_i(), b, b.mult_mi(), -b);
+			optimization.popPipeliningFactor();
+
+			//b = bMinSelector ? -b : b;
+			//b = axisIsOneSelector ? b : b.mult_i();
+
+			optimization.pushPipeliningFactor(0.5);
+			optimization.pushFixOpMode(Optimization.bitSizeAll(), Optimization.offsetNoOverflow(), MathOps.MUL);
+			DFESu3Vector psi = tSelector ?
+					(tLowerHalfSelector?
+							(jIsZeroSelector ? currNeighbour.s0.multBy2() : currNeighbour.s1.multBy2()) :
+							(jIsZeroSelector ? currNeighbour.s2.multBy2() : currNeighbour.s3.multBy2()))
+					: a + b;
+			optimization.popFixOpMode(MathOps.MUL);
+			optimization.popPipeliningFactor();
+			DFESu3VectorType psiType=psi.getType();
+			System.out.println("Dslash - type of psi before gauge: " + psi.getType().toString());
+
+			//Before multiplying, we want to downcast psi so its elements have 27 bits
+			//each. However, we need to ensure that cast won't cause an overflow. To do
+			//this, we first see if the most significant bit (apart from the sign bit)
+			//of the maximum is set. If so, we need to shift. But note that if we are
+			//already shifting due to expDiff!=0, we don't need any extra shift.
+			//I.e., we only need an extra shift if the Msb is set AND expDiff=0.
+			//DFEVar psiMax = psi.findAbsMax();
+			//DFEVar psiMsb = psiMax.slice(psiMax.getType().getTotalBits()-2);
+
+			//shift psi so it has the same exponent as outputSpinor
+			//DFEVar cond=psiMsb & (expDiff===0);
+			//DFEVar actualShift = cond ? 1 : expDiff;
+
+			//actualShift = actualShift.cast(dfeUInt(3));
+			//psi = psi.shiftRight(actualShift);
+
+			optimization.pushPipeliningFactor(0.0);
+			psi=psi.shiftRight(expDiff.cast(dfeUInt(3)));
+			optimization.popPipeliningFactor();
+
+			/*psi=psi.castElements(
+								dfeFixOffset(
+									psiType.getC0Type().getRealType().getTotalBits() - 1,
+									((DFEFix)psiType.getC0Type().getRealType()).getOffset(),
+									SignMode.TWOSCOMPLEMENT
+								)
+					);*/
+
+			System.out.println("Dslash - type of psi being multiplied: " + psi.getType().toString());
+			optimization.pushPipeliningFactor(0.5);
+			psi = currGauge * psi;
+			psi = psi.castElements(psiType);
+			optimization.popPipeliningFactor();
+			//psi = cond ? psi.multBy2() : psi;
+
+			System.out.println("Dslash - type of psi after gauge: " + psi.getType().toString());
+			//Since gauge leaves the norm of psi intact, downcasting should be relatively safe.
+
+			System.out.println("Dslash - type of psi after gauge, after cast: " + psi.getType().toString());
+
+			optimization.pushPipeliningFactor(0.1);
+			DFESu3Vector toAddTo = tSelector ?
+					(tLowerHalfSelector?
+							(jIsZeroSelector ? outputSpinor.s0 : outputSpinor.s1 ) :
+							(jIsZeroSelector ? outputSpinor.s2 : outputSpinor.s3 ))
+					: (jIsZeroSelector ? outputSpinor.s0 : outputSpinor.s1);
+			optimization.popPipeliningFactor();
+			System.out.println("Dslash - type of 1st toAddTo before add: " + toAddTo.getType().toString());
+
+			optimization.pushPipeliningFactor(0.5);
+			toAddTo += psi;
+			optimization.popPipeliningFactor();
+			//toAddTo = toAddTo.castElements(psi.getType()) + psi;
+
+			System.out.println("Dslash - type of 1st toAddTo after add: " + toAddTo.getType().toString());
+
+			/*outputSpinor.s0 = tSelector ?	(addToS0Selector ? toAddTo : outputSpinor.s0)
+										:	(jIsZeroSelector ? toAddTo : outputSpinor.s0);
+			outputSpinor.s1 = tSelector ?	(addToS1Selector ? toAddTo : outputSpinor.s1)
+										:	(jIsOneSelector  ? toAddTo : outputSpinor.s1);*/
+			optimization.pushPipeliningFactor(0.1);
+			outputSpinor = DFESpinorType.newInstance(m_constants,
+					tSelector 	? (addToS0Selector ? toAddTo : outputSpinor.s0)
+								: (jIsZeroSelector ? toAddTo : outputSpinor.s0),
+					tSelector	? (addToS1Selector ? toAddTo : outputSpinor.s1)
+								: (jIsOneSelector  ? toAddTo : outputSpinor.s1),
+					outputSpinor.s2,
+					outputSpinor.s3,
+					outputSpinor.m_shift
+			);
+			optimization.popPipeliningFactor();
+
+
+			System.out.println("Dslash - type of outSpinor after 1st tSelector: " + outputSpinor.getType().toString());
+
+			optimization.pushPipeliningFactor(0);
+			DFEVar psiMinI = psiMin.cast(dfeRawBits(1))
+								.cat(axisIsOne.cast(dfeRawBits(1)))
+								.cast(dfeUInt(2));
+			DFEQCDSelector psiMinISelector = new DFEQCDSelector(m_constants, psiMinI);
+			optimization.popPipeliningFactor();
+			//3 = 11 : psiMin & axisIsOne
+			//2 = 10 : psiMin & ~axisIsOne
+			//1 = 01 : ~psiMin & axisIsOne
+			//0 = 00 : ~psiMin & ~axisIsOne
+
+			//psi = psiMinSelector ? psi : -psi;
+			//psi = axisIsOneSelector ? psi : psi.mult_i();
+
+			optimization.pushPipeliningFactor(0.1);
+			psi = psiMinISelector.mux(psi.mult_mi(), -psi, psi.mult_i(), psi);
+			optimization.popPipeliningFactor();
+
+			optimization.pushPipeliningFactor(0);
+			DFEQCDSelector jIsOneXORAxisIsTwoSelector = new DFEQCDSelector(m_constants,
+					j===1 ^ axis===2);
+			DFEQCDSelector jIsZeroXORAxisIsTwoSelector = new DFEQCDSelector(m_constants,
+					j===0 ^ axis===2);
+			optimization.popPipeliningFactor();
+
+			optimization.pushPipeliningFactor(0.1);
+			toAddTo = tSelector ? toAddTo :
+					jIsOneXORAxisIsTwoSelector ? outputSpinor.s2 : outputSpinor.s3;
+			optimization.popPipeliningFactor();
+
+			System.out.println("Dslash - type of 2nd toAddTo before add: " + toAddTo.getType().toString());
+
+			optimization.pushPipeliningFactor(0.5);
+			toAddTo = tSelector ? toAddTo : toAddTo + psi;
+			optimization.popPipeliningFactor();
+
+			System.out.println("Dslash - type of 2nd toAddTo after add: " + toAddTo.getType().toString());
+
+			/*outputSpinor.s2 = tSelector ? (addToS2Selector ? toAddTo : outputSpinor.s2)
+								: (jIsOneXORAxisIsTwoSelector ? toAddTo : outputSpinor.s2);
+			outputSpinor.s3 = tSelector ? (addToS3Selector ? toAddTo : outputSpinor.s3 )
+								: (jIsZeroXORAxisIsTwoSelector ? toAddTo : outputSpinor.s3);*/
+			optimization.pushPipeliningFactor(0.1);
+			outputSpinor = DFESpinorType.newInstance(m_constants,
+					outputSpinor.s0,
+					outputSpinor.s1,
+					tSelector	? (addToS2Selector ? toAddTo : outputSpinor.s2)
+								: (jIsOneXORAxisIsTwoSelector ? toAddTo : outputSpinor.s2),
+					tSelector ? (addToS3Selector ? toAddTo : outputSpinor.s3 )
+								: (jIsZeroXORAxisIsTwoSelector ? toAddTo : outputSpinor.s3),
+					outputSpinor.m_shift
+			);
+			optimization.popPipeliningFactor();
+
+			System.out.println("Dslash - type of outSpinor after 2nd tSelector: " + outputSpinor.getType().toString());
+
+		}
+		optimization.pushPipeliningFactor(0.75);
+		DFESpinor result = outputSpinor.carefullyAdd( outputSpinor.streamoffset(-1) , 3 );
+		optimization.popPipeliningFactor();
+
+		System.out.println("Dslash - type of result: " + result.getType().toString());
+
+		return result;
+	}
+
+	void outputDebugPsi(
+			DFESu3Vector psi, DFESu3Vector a, DFESu3Vector b,
+			DFEVar enabled , DFEVar axis, DFEVar dir, DFEVar j, DFEVar neighbourID
+			)
+	{
+
+		debug.simPrintf("psi", enabled,
+				"- axis=%d, dir=%d, j=%d, neighbour=%d -\n" +
+				"( %10.7f, %10.7f )     ( %10.7f, %10.7f )     ( %10.7f, %10.7f )\n" +
+				"( %10.7f, %10.7f )  +  ( %10.7f, %10.7f )  =  ( %10.7f, %10.7f )\n" +
+				"( %10.7f, %10.7f )     ( %10.7f, %10.7f )     ( %10.7f, %10.7f )\n",
+				axis, dir, j, neighbourID,
+				a.getC0().getReal(), a.getC0().getImaginary(), b.getC0().getReal(), b.getC0().getImaginary(), psi.getC0().getReal(), psi.getC0().getImaginary(),
+				a.getC1().getReal(), a.getC1().getImaginary(), b.getC1().getReal(), b.getC1().getImaginary(), psi.getC1().getReal(), psi.getC1().getImaginary(),
+				a.getC2().getReal(), a.getC2().getImaginary(), b.getC2().getReal(), b.getC2().getImaginary(), psi.getC2().getReal(), psi.getC2().getImaginary()
+		);
+
+	}
+	void outputDebugPsiOrPhi(DFESu3Vector psi, String fileName,
+			DFEVar enabled , DFEVar axis, DFEVar dir, DFEVar j, DFEVar neighbourID)
+	{
+
+		debug.simPrintf(fileName, enabled,
+				"- axis=%d, dir=%d, j=%d, neighbour=%d -\n" +
+				"( %10.7f, %10.7f )\n" +
+				"( %10.7f, %10.7f )\n" +
+				"( %10.7f, %10.7f )\n",
+				axis, dir, j, neighbourID,
+				psi.getC0().getReal(), psi.getC0().getImaginary(),
+				psi.getC1().getReal(), psi.getC1().getImaginary(),
+				psi.getC2().getReal(), psi.getC2().getImaginary()
+		);
+
+	}
+
+}

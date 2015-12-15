@@ -1,0 +1,146 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.managers.BuildConfig;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig.Effort;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig.OptimizationTechnique;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.Demux;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.Mux;
+import com.maxeler.maxcompiler.v2.managers.custom.stdlib.MemoryControllerConfig;
+
+public class LQCDManager extends CustomManager {
+
+
+	public LQCDManager(LQCDEngineParameters engineParameters) {
+		super(engineParameters);
+
+		int T  = engineParameters.getT();
+		int LX = engineParameters.getLX();
+		int LY = engineParameters.getLY();
+		int LZ = engineParameters.getLZ();
+		TargetLQCDType targetLQCDType = engineParameters.getTargetLQCDType();
+
+		config.setDefaultStreamClockFrequency(engineParameters.getFreq());
+
+		MemoryControllerConfig memCfg = new MemoryControllerConfig();
+		memCfg.setBurstSize(8);
+		memCfg.setMAX4qMode(true);
+		memCfg.setEnableParityMode(true, true, 72, false);
+		config.setMemoryControllerConfig(memCfg);
+		config.setOnCardMemoryFrequency(LMemFrequency.MAX4MAIA_666);
+
+		KernelBlock diracKernel = addKernel(
+				new LQCDKernel(
+						makeKernelParameters("diracKernel"),
+						T,
+						LX,
+						LY,
+						LZ,
+						engineParameters.getNumPipes(),
+						engineParameters.getLoopOffset(),
+						false,
+						targetLQCDType
+				)
+		);
+
+		FieldAddressGenerator writeCmdKernel0 = new FieldAddressGenerator(
+				makeKernelParameters("writeCmdKernel0"),
+				T,
+				"writeCmdOut0");
+		DFELink toLmem0 = addStreamToOnCardMemory("toLmem0", addKernel(writeCmdKernel0).getOutput("writeCmdOut0"));
+
+		FieldAddressGenerator writeCmdKernel1 = new FieldAddressGenerator(
+				makeKernelParameters("writeCmdKernel1"),
+				T,
+				"writeCmdOut1");
+		DFELink toLmem1 = addStreamToOnCardMemory("toLmem1", addKernel(writeCmdKernel1).getOutput("writeCmdOut1"));
+
+
+		FieldAddressGenerator readCmdKernel0 = new FieldAddressGenerator(
+				makeKernelParameters("readCmdKernel0"),
+				T,
+				"readCmdOut0");
+		DFELink fromLmem0 = addStreamFromOnCardMemory("fromLmem0", addKernel(readCmdKernel0).getOutput("readCmdOut0"));
+
+		FieldAddressGenerator readCmdKernel1 = new FieldAddressGenerator(
+				makeKernelParameters("readCmdKernel1"),
+				T,
+				"readCmdOut1");
+		DFELink fromLmem1 = addStreamFromOnCardMemory("fromLmem1", addKernel(readCmdKernel1).getOutput("readCmdOut1"));
+
+
+		FieldAddressGenerator readCmdKernel2 = new FieldAddressGenerator(
+				makeKernelParameters("readCmdKernel2"),
+				T,
+				"readCmdOut2");
+		DFELink fromLmem2 = addStreamFromOnCardMemory("fromLmem2", addKernel(readCmdKernel2).getOutput("readCmdOut2"));
+		diracKernel.getInput("diracKernel_p_spinor_in") <== fromLmem2;
+
+		FieldAddressGenerator readCmdKernel3 = new FieldAddressGenerator(
+				makeKernelParameters("readCmdKernel3"),
+				T,
+				"readCmdOut3");
+		DFELink fromLmem3 = addStreamFromOnCardMemory("fromLmem3", addKernel(readCmdKernel3).getOutput("readCmdOut3"));
+		diracKernel.getInput("diracKernel_clover") <== fromLmem3;
+
+		diracKernel.getInput("diracKernel_gauge")     <== fromLmem0;
+
+
+		Demux spfromLmem0Demux = demux("spfromLmem0Demux");
+		spfromLmem0Demux.getInput() <== fromLmem1;
+		diracKernel.getInput("diracKernel_spinor_in") <== spfromLmem0Demux.addOutput("spfromLmem0Demux_toKernel");
+		addStreamToCPU("data_out")                   <== spfromLmem0Demux.addOutput("spfromLmem0Demux_toCPU");
+
+
+		Mux toLmemMux = mux("toLmemMux");
+		toLmemMux.addInput("toLmemMux_fromCPU") <== addStreamFromCPU("data_in");
+		toLmemMux.addInput("toLmemMux_fromKernel") <== diracKernel.getOutput("diracKernel_spinor0_out");
+
+		toLmem0 <== toLmemMux.getOutput();
+
+		toLmem1 <== diracKernel.getOutput("diracKernel_spinor1_out");
+
+		//_CustomManagers.setStreamBufferSpaceRequirement(x4, 4608*2048);
+
+
+		setParameter("quartus_map.ram_usage", "48000");
+		config.setAllowNonMultipleTransitions(true);
+
+
+		/*DebugLevel MyDebugLevel = new DebugLevel();
+		MyDebugLevel.setHasStreamStatus(true);
+		debug.setDebugLevel(MyDebugLevel);*/
+
+		configBuild(engineParameters );
+
+		addMaxFileConstant("T", engineParameters.getT());
+		addMaxFileConstant("LX", engineParameters.getLX());
+		addMaxFileConstant("LY", engineParameters.getLY());
+		addMaxFileConstant("LZ", engineParameters.getLZ());
+		addMaxFileConstant("numPipes", engineParameters.getNumPipes());
+		addMaxFileConstant("loopOffset", engineParameters.getLoopOffset());
+		addMaxFileConstant("spCmdSize", engineParameters.getSpCmdSize());
+		addMaxFileConstant("gCmdSize", engineParameters.getGCmdSize());
+		addMaxFileConstant("cCmdSize", engineParameters.getCCmdSize());
+		addMaxFileConstant("realStoreBits", engineParameters.getRealStoreBits());
+		addMaxFileConstant("realStoreOffset", engineParameters.getRealStoreOffset());
+	}
+
+	private void configBuild(LQCDEngineParameters params) {
+		BuildConfig buildConfig = getBuildConfig();
+		buildConfig.setMPPRCostTableSearchRange(params.getMPPRStartCT(), params.getMPPREndCT());
+		buildConfig.setMPPRParallelism(params.getMPPRThreads());
+		buildConfig.setMPPRRetryNearMissesThreshold(params.getMPPRRetryThreshold());
+		buildConfig.setBuildEffort(Effort.HIGH);
+
+		buildConfig.setOptimizationGoal(OptimizationTechnique.AREA);
+	}
+
+	public static void main(String[] args) {
+		/*System.out.println(args[0]);*/
+		LQCDManager manager = new LQCDManager(new LQCDEngineParameters(args));
+		manager.build();
+	}
+}

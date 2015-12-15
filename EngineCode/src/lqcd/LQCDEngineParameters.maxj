@@ -1,0 +1,125 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig.Effort;
+
+public class LQCDEngineParameters extends EngineParameters {
+
+	public LQCDEngineParameters(String[] args) {
+		super(args);
+	}
+
+	private static final String s_LX         		= "LX";
+	private static final String s_LY         		= "LY";
+	private static final String s_LZ        		= "LZ";
+	private static final String s_T          		= "T";
+	private static final String s_numPipes   		= "P";
+	private static final String s_loopOffset 		= "LOOP_OFFSET";
+	private static final String s_frequency  		= "frequency";
+	private static final String s_effort     		= "buildEffort";
+	private static final String s_realStoreBits		= "realStoreBits";
+	private static final String s_realStoreOffset	= "realStoreOffset";
+	private static final String s_spCmdSize  		= "spCmdSize";
+	private static final String s_gCmdSize   		= "GCmdSize";
+	private static final String s_cCmdSize   		= "cCmdSize";
+	private static final String s_targetLQCDType	= "targetLQCDType";
+
+	@Override
+	protected void declarations() {
+		declareParam(s_T,          DataType.INT, 4);											//was: 8
+		declareParam(s_LZ,         DataType.INT, 4);											//was: 8
+		declareParam(s_LY,         DataType.INT, 4);											//was: 8
+		declareParam(s_LX,         DataType.INT, 8);											//was: 16
+		declareParam(s_numPipes,   DataType.INT, 8);											//was: 8
+		declareParam(s_loopOffset, DataType.INT, 16);  // should divide LX*LY/2					//was: 16
+		//declareParam(s_spCmdSize,  DataType.INT, 16);  // should divide LX*LY*LZ/2*24*4  /384	//was: 128
+		declareParam(s_spCmdSize,  DataType.INT, 12);  // should divide LX*LY*LZ/2*24*3  /384	//was: 128
+		//declareParam(s_gCmdSize,   DataType.INT, 96); // should divide LX*LY*LZ/2*18*4*8 /384	//was: 128
+		declareParam(s_gCmdSize,   DataType.INT, 72); // should divide LX*LY*LZ/2*18*3*8 /384	//was: 128
+		//declareParam(s_cCmdSize,   DataType.INT, 48); // should divide LX*LY*LZ/2*72*4   /384	//was: 128
+		declareParam(s_cCmdSize,   DataType.INT, 36); // should divide LX*LY*LZ/2*72*3   /384	//was: 128
+
+		declareParam(s_frequency,  DataType.INT, 150);
+		declareParam(s_targetLQCDType, TargetLQCDType.class, TargetLQCDType.BQCD);
+		declareParam(s_effort,     Effort.class, Effort.HIGH);
+
+		declareParam(s_realStoreBits, DataType.INT, 24);
+		declareParam(s_realStoreOffset, DataType.INT, -22);
+	}
+
+	@Override
+	protected void deriveParameters() {
+//		deriveParam(s_volume, getLX() * getLY() * getLZ() * getT() );
+	}
+//
+//	@Override
+//	protected void validate() {
+//		if (getStreamFrequency() <= 0)
+//			throw new IllegalArgumentException("Stream frequency should be > 0.");
+//	}
+//
+	public int getLX(){
+		return getParam(s_LX);
+	}
+
+	public int getLY(){
+		return getParam(s_LY);
+	}
+
+	public int getLZ(){
+		return getParam(s_LZ);
+	}
+
+	public int getT(){
+		return getParam(s_T);
+	}
+
+	public int getNumPipes(){
+		return getParam(s_numPipes);
+	}
+
+	public int getLoopOffset(){
+		return getParam(s_loopOffset);
+	}
+
+	public int getSpCmdSize(){
+		return getParam(s_spCmdSize);
+	}
+
+	public int getGCmdSize(){
+		return getParam(s_gCmdSize);
+	}
+
+	public int getCCmdSize(){
+		return getParam(s_cCmdSize);
+	}
+
+	public int getFreq(){
+		return getParam(s_frequency);
+	}
+
+	public TargetLQCDType getTargetLQCDType() {
+		return getParam(s_targetLQCDType);
+	}
+
+	public int getEffort(){
+		return getParam(s_effort);
+	}
+
+	public int getRealStoreBits()
+	{
+		return getParam(s_realStoreBits);
+	}
+
+	public int getRealStoreOffset()
+	{
+		return getParam(s_realStoreOffset);
+	}
+
+	@Override
+	public String getBuildName() {
+		return getMaxFileName() + "_" + getTarget() +
+		       "_" + getT() + "_" + getLX() + "_" +
+		       getLY() + "_" + getLZ() + "pipelined";
+	}
+}

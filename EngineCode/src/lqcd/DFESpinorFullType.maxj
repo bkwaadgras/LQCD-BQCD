@@ -1,0 +1,14 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.FullType;
+
+public class DFESpinorFullType extends
+						FullType<DFESpinorDoubtType, DFESpinorType, DFESpinor>
+{
+	public DFESpinorFullType(DFESpinorDoubtType doubt_type, DFESpinorType kernel_type)
+	{
+		super(doubt_type, kernel_type);
+	}
+
+}
+

@@ -1,0 +1,201 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+/**
+ * This class represent a Su(3) 3x3 gauge matrix
+ * A few arithemetic operations are also defined
+ * @author Siavash Zangeneh and Bas Kwaadgras
+ */
+
+public class DFESu3 extends KernelLib  {
+
+	/**
+	 * 9 complex numbers forming a 3x3 matrix
+	 */
+	public DFEComplex c00, c01, c02,
+	                  c10, c11, c12,
+	                  c20, c21, c22;
+
+
+	private final LQCDConstants m_constants;
+
+	/**
+	 * Constructor without instantiation of the DFE variables
+	 * @param constants holds information about the system such as arithmetic format
+	 */
+	protected DFESu3(LQCDConstants constants) {
+		super(constants.getKernel());
+		m_constants = constants;
+	}
+	protected DFESu3(LQCDConstants constants, DFEType realType) {
+		super(constants.getKernel());
+		m_constants = constants;
+	}
+	/**
+	 * Instantiates a DFESu3: instantiates the elements but does not connect them to data.
+	 * @param constants holds information about the system such as arithmetic format
+	 * @param realType instantiated elements have type DFEComplexType(realType)
+	 */
+	public static DFESu3 createInstance(LQCDConstants constants, DFEType realType)
+	{
+		DFESu3 toret = new DFESu3(constants, realType);
+		DFEComplexType cplxType = new DFEComplexType(realType);
+		toret.c00 = cplxType.newInstance(constants.getKernel());
+		toret.c01 = cplxType.newInstance(constants.getKernel());
+		toret.c02 = cplxType.newInstance(constants.getKernel());
+		toret.c10 = cplxType.newInstance(constants.getKernel());
+		toret.c11 = cplxType.newInstance(constants.getKernel());
+		toret.c12 = cplxType.newInstance(constants.getKernel());
+		toret.c20 = cplxType.newInstance(constants.getKernel());
+		toret.c21 = cplxType.newInstance(constants.getKernel());
+		toret.c22 = cplxType.newInstance(constants.getKernel());
+		return toret;
+	}
+
+	/**
+	 * Constructor with data initialisation
+	 * @param constants holds information about the system such as arithmetic format
+	 * @param su3 a vector holding a number of gauge matrixes
+	 * @param rightShift DFEVar holding the amount by which to right-shift the input elements
+	 * @param gauge_index the index of the target gauge in the vector
+	 * @param realType input elements will be cast to DFEComplexType(realType).
+	 */
+	protected DFESu3(LQCDConstants constants, DFEVector<DFEComplex> su3, DFEVar rightShift,
+			int gauge_index,
+			DFEType realType) {
+		super(constants.getKernel());
+		m_constants = constants;
+		c00 = su3[gauge_index*9+0].cast(new DFEComplexType(realType));
+		c00 = DFEComplexType.newInstance(this,
+				c00.getReal() >> rightShift, c00.getImaginary() >> rightShift);
+		c01 = su3[gauge_index*9+1].cast(new DFEComplexType(realType));
+		c01 = DFEComplexType.newInstance(this,
+				c01.getReal() >> rightShift, c01.getImaginary() >> rightShift);
+		c02 = su3[gauge_index*9+2].cast(new DFEComplexType(realType));
+		c02 = DFEComplexType.newInstance(this,
+				c02.getReal() >> rightShift, c02.getImaginary() >> rightShift);
+		c10 = su3[gauge_index*9+3].cast(new DFEComplexType(realType));
+		c10 = DFEComplexType.newInstance(this,
+				c10.getReal() >> rightShift, c10.getImaginary() >> rightShift);
+		c11 = su3[gauge_index*9+4].cast(new DFEComplexType(realType));
+		c11 = DFEComplexType.newInstance(this,
+				c11.getReal() >> rightShift, c11.getImaginary() >> rightShift);
+		c12 = su3[gauge_index*9+5].cast(new DFEComplexType(realType));
+		c12 = DFEComplexType.newInstance(this,
+				c12.getReal() >> rightShift, c12.getImaginary() >> rightShift);
+		c20 = su3[gauge_index*9+6].cast(new DFEComplexType(realType));
+		c20 = DFEComplexType.newInstance(this,
+				c20.getReal() >> rightShift, c20.getImaginary() >> rightShift);
+		c21 = su3[gauge_index*9+7].cast(new DFEComplexType(realType));
+		c21 = DFEComplexType.newInstance(this,
+				c21.getReal() >> rightShift, c21.getImaginary() >> rightShift);
+		c22 = su3[gauge_index*9+8].cast(new DFEComplexType(realType));
+		c22 = DFEComplexType.newInstance(this,
+				c22.getReal() >> rightShift, c22.getImaginary() >> rightShift);
+	}
+
+	DFEType getRealType()
+	{
+		return c00.getReal().getType();
+	}
+
+	/**
+	 * conjugates each element of the matrix
+	 * @return the result as a new su3 object
+	 */
+	public DFESu3 conjugate () {
+		DFESu3 temp = createInstance(m_constants, this.getRealType());
+		temp.c00 = c00.conjugate();
+		temp.c01 = c01.conjugate();
+		temp.c02 = c02.conjugate();
+		temp.c10 = c10.conjugate();
+		temp.c11 = c11.conjugate();
+		temp.c12 = c12.conjugate();
+		temp.c20 = c20.conjugate();
+		temp.c21 = c21.conjugate();
+		temp.c22 = c22.conjugate();
+		return temp;
+	}
+
+	/**
+	 * Perform a matrix-vector multiplication to a su3vector
+	 * @param a the su3vector to multiply to
+	 * @return the result of matrix-vector multiply as a new su3 object
+	 */
+	public DFESu3Vector mul (DFESu3Vector a) {
+		return DFESu3VectorType.newInstance(m_constants,
+				c00 * a.getC0() + c01 *a.getC1() + c02 * a.getC2(),
+				c10 * a.getC0() + c11 *a.getC1() + c12 * a.getC2(),
+				c20 * a.getC0() + c21 *a.getC1() + c22 * a.getC2()
+				);
+	}
+
+	/**
+	 * Multiply the inverse conjugate of the matrix with a su3vector
+	 * @param a the su3vector to multiply to
+	 * @return the result of matrix-vector multiply as a new su3 object
+	 */
+	public DFESu3Vector inverse_multiply (DFESu3Vector a) {
+		DFESu3VectorType tempType = a.getType();
+		DFESu3Vector temp = tempType.newInstance(m_constants.getKernel());
+		temp.setC0 ( c00.conjugate() * a.getC0() + c10.conjugate() * a.getC1() + c20.conjugate() * a.getC2() );
+		temp.setC1 ( c01.conjugate() * a.getC0() + c11.conjugate() * a.getC1() + c21.conjugate() * a.getC2() );
+		temp.setC2 ( c02.conjugate() * a.getC0() + c12.conjugate() * a.getC2() + c22.conjugate() * a.getC2() );
+		return temp;
+	}
+
+	/**
+	 * transposes the matrix and conjugates each element
+	 * @return the conjugate transposed matrix as a new su3 object
+	 */
+	public DFESu3 adjoint () {
+		DFESu3 temp = createInstance(m_constants, this.getRealType());
+		temp.c00 = c00.conjugate();
+		temp.c01 = c10.conjugate();
+		temp.c02 = c20.conjugate();
+		temp.c10 = c01.conjugate();
+		temp.c11 = c11.conjugate();
+		temp.c12 = c21.conjugate();
+		temp.c20 = c02.conjugate();
+		temp.c21 = c12.conjugate();
+		temp.c22 = c22.conjugate();
+		return temp;
+	}
+
+	/**
+	 * transposes the matrix
+	 * @return the transposed matrix as a new su3 object
+	 */
+	public DFESu3 transpose () {
+		DFESu3 temp = createInstance(m_constants, this.getRealType());
+		temp.c00 = c00;
+		temp.c01 = c10;
+		temp.c02 = c20;
+		temp.c10 = c01;
+		temp.c11 = c11;
+		temp.c12 = c21;
+		temp.c20 = c02;
+		temp.c21 = c12;
+		temp.c22 = c22;
+		return temp;
+	}
+
+	public void connect (DFESu3 a)
+	{
+		c00 <== a.c00;
+		c01 <== a.c01;
+		c02 <== a.c02;
+		c10 <== a.c10;
+		c11 <== a.c11;
+		c12 <== a.c12;
+		c20 <== a.c20;
+		c21 <== a.c21;
+		c22 <== a.c22;
+	}
+}

@@ -1,0 +1,83 @@
+package lqcd;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.RoundingMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.LMemCommandStream;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.CounterChain;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+
+/**
+ * This class constructs an address generator suitable for accessing gauge and spinor fields.
+ * The access pattern is generally linear, with the exception that halo time-slices can be
+ * accessed. The number of halos is configurable by a scalar input.
+ * @author Siavash Zangeneh
+ *
+ */
+public class FieldAddressGenerator extends Kernel {
+
+	public FieldAddressGenerator( KernelParameters params, int T, String cmdOutName) {
+
+		super(params);
+
+		DFEStruct cmd = LMemCommandStream.getLMemCommandDFEStructType().newInstance(this);
+		DFEType addressType = (DFEType)cmd["address"].getType();
+
+		DFEVar startAddress = io.scalarInput("startAddress", addressType);
+		DFEVar halos = io.scalarInput("halos", addressType);
+		DFEVar cmdSize = io.scalarInput("cmdSize", addressType);
+		DFEVar cmdsPerTSlice = io.scalarInput("burstsPerTSlice", addressType);
+
+		DFEVar numTimesSlice = T + 2 * halos;
+
+		CounterChain chain = control.count.makeCounterChain();
+		DFEVar t   = chain.addCounter(numTimesSlice, 1);
+		DFEVar xyz = chain.addCounter(cmdsPerTSlice, 1);
+
+		optimization.pushEnableBitGrowth(true);
+
+		DFEVar tt = mod(t + T - halos,T);
+
+		DFEVar address = (startAddress + tt * cmdsPerTSlice * cmdSize + xyz * cmdSize).cast(addressType);
+
+		optimization.popEnableBitGrowth();
+
+
+		cmd["address"] = address;
+		cmd["size"]    = cmdSize.cast((DFEType)cmd["inc"].getType());
+		cmd["inc"]     = constant.var((DFEType)cmd["inc"].getType(),    1);
+		cmd["stream"]  = constant.var((DFEType)cmd["stream"].getType(), 1);
+		cmd["tag"]     = (t === (numTimesSlice - 1) & xyz === (cmdsPerTSlice - 1) );
+		LMemCommandStream.makeKernelOutput(cmdOutName, constant.var(true), cmd);
+
+	}
+
+	/**
+	 * Calculate the remainder of dividing a DFE variable by an integer constant
+	 * @param dividend DFE variable
+	 * @param divisor  integer
+	 * @return the remainder
+	 */
+	private DFEVar mod(DFEVar dividend, int divisor) {
+		if (MathUtils.isPowerOf2(divisor)) {
+			 //if divisor is a power of 2, remainder can be found by masking
+			return (dividend & (divisor-1));
+		} else {
+			 //if divisor is not a power of 2, an actual division needs to be performed
+			optimization.pushRoundingMode(RoundingMode.TRUNCATE);
+			DFEVar divisor_ = constant.var(
+					dfeUInt(MathUtils.bitsToRepresent(divisor)),
+					divisor
+					);
+			DFEVar quotient = (dividend / divisor)
+			                  .cast(dfeUInt(dividend.getType().getTotalBits()));
+			DFEVar remainder = dividend - quotient * divisor_;
+			optimization.popRoundingMode();
+			return remainder;
+		}
+	}
+
+}

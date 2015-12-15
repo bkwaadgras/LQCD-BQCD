@@ -1,0 +1,107 @@
+//package lqcd;
+//
+//import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+//import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+//import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+//
+///**
+// * This class represents a 2x3 halfspinor matrix and
+// * provides methods for a few arithmetic operations on halfspinors.
+// * @author Siavash Zangeneh
+// */
+//public class DFEHalfSpinor extends KernelLib {
+//
+//	/**
+//	 * 2 su3Vectors, each su3vector is a 3x1 vector
+//	 */
+//	public DFESu3Vector s0, s1;
+//
+//	private final LQCDConstants m_constants;
+//
+//	/**
+//	 * Constructor without instantiation of the DFE variables
+//	 * @param constants holds information about the system such as arithmetic format
+//	 */
+//	protected DFEHalfSpinor(LQCDConstants constants) {
+//		super(constants.getKernel());
+//		m_constants = constants;
+//	}
+//
+//	/**
+//	 * Constructor with data initialization
+//	 * @param constants holds information about the system such as arithmetic format
+//	 * @param in a vector of size 6, holding initial value of the halfspinor
+//	 */
+//	protected DFEHalfSpinor(LQCDConstants constants, DFEVector<DFEComplex> in) {
+//		super(constants.getKernel());
+//		m_constants = constants;
+//		s0 = new DFESu3Vector (m_constants);
+//		s1 = new DFESu3Vector (m_constants);
+//
+//		s0.c0 = in[0];
+//		s0.c1 = in[1];
+//		s0.c2 = in[2];
+//
+//		s1.c0 = in[3];
+//		s1.c1 = in[4];
+//		s1.c2 = in[5];
+//
+//	}
+//
+//	/**
+//	 * Instantiates the matrix elements without initializing the data
+//	 */
+//	public void newInstant() {
+//		s0 = new DFESu3Vector (m_constants);
+//		s1 = new DFESu3Vector (m_constants);
+//	}
+//
+//	/**
+//	 * Connect the matrix elements with the elements of another halfspinor
+//	 * Should be use in conjunction with newInstant() method
+//	 * @param a the halfspinor to connect to
+//	 */
+//	public void connect (DFEHalfSpinor a) {
+//		s0 <== a.s0;
+//		s1 <== a.s1;
+//	}
+//
+//	/**
+//	 * Works the same as streamoffset for DFEVars, except that it is defined for DFEHalfSpinors
+//	 * @param offset integer offset
+//	 * @return the object holding the offsetted halfspinor
+//	 */
+//	public DFEHalfSpinor streamoffset(int offset) {
+//		DFEHalfSpinor temp = new DFEHalfSpinor(m_constants);
+//		temp.s0 = new DFESu3Vector(m_constants);
+//		temp.s1 = new DFESu3Vector(m_constants);
+//
+//		temp.s0.c0 = stream.offset(s0.c0, offset);
+//		temp.s0.c1 = stream.offset(s0.c1, offset);
+//		temp.s0.c2 = stream.offset(s0.c2, offset);
+//		temp.s1.c0 = stream.offset(s1.c0, offset);
+//		temp.s1.c1 = stream.offset(s1.c1, offset);
+//		temp.s1.c2 = stream.offset(s1.c2, offset);
+//
+//		return temp;
+//	}
+//
+//	/**
+//	 * converts the halfspinor to a vector of complex numbers, suitable for FMEM ports
+//	 * @return the vectored halfspinor
+//	 */
+//	public DFEVector<DFEComplex> convertToDFEVector () {
+//		DFEVector<DFEComplex> result =
+//			LQCDConstants.getVectoredHalfSpinorType().newInstance(m_constants);
+//
+//		result[0]  <== s0.c0;
+//		result[1]  <== s0.c1;
+//		result[2]  <== s0.c2;
+//		result[3]  <== s1.c0;
+//		result[4]  <== s1.c1;
+//		result[5]  <== s1.c2;
+//
+//		return result;
+//	}
+//
+//}

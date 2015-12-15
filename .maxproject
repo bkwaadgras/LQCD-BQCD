@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<maxCompilerManager version="2">
+<enginePart internalEngineSubproject="LQCD-BQCD-cloversplit-pipelining-v2_EngineCode" isSrcBin="false" isUseDefaultSelected="false" outputLocation="/LQCD-BQCD-cloversplit-pipelining-v2_EngineCode/bin" projectName="LQCD-BQCD-cloversplit-pipelining-v2"/>
+<cpuPart internalCpuSubproject="LQCD-BQCD-cloversplit-pipelining-v2_CPUCode"/>
+<watchedFiles/>
+</maxCompilerManager>

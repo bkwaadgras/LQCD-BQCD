@@ -1,0 +1,910 @@
+package lqcd;
+
+import java.util.ArrayList;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplex;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEComplexType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+/**
+ * This class represents a spinor as used in Lattice QCD. A spinor consists of
+ * 4 vectors (s0, s1, s2, and s3), each of which consists or 3 complex numbers.
+ * @author Bas Kwaadgras and Siavash Zangeneh
+ *
+ */
+public class DFESpinor extends KernelLib {
+
+	/**
+	 * 4 su3Vectors, each su3vector is a 3x1 vector
+	 */
+	public final DFESu3Vector s0, s1, s2, s3;
+	public DFEVar m_shift;
+
+
+	private final LQCDConstants m_constants;
+	private final DFESpinorType m_type;
+
+	private DFESpinor(LQCDConstants constants, DFESpinorType type)
+	{
+		super(constants.getKernel());
+		m_type = type;
+		m_constants = constants;
+		m_shift = dfeInt(7).newInstance(constants.getKernel());
+		s0=type.getS0Type().newInstance(constants.getKernel());
+		s1=type.getS1Type().newInstance(constants.getKernel());
+		s2=type.getS2Type().newInstance(constants.getKernel());
+		s3=type.getS3Type().newInstance(constants.getKernel());
+	}
+
+	protected DFESpinor(LQCDConstants constants, DFEStruct data, DFEVar shift,
+			DFESpinorType type)
+	{
+		super(constants.getKernel());
+		m_type = type;
+		m_constants = constants;
+		s0 = (DFESu3Vector)data.get("s0");
+		s1 = (DFESu3Vector)data.get("s1");
+		s2 = (DFESu3Vector)data.get("s2");
+		s3 = (DFESu3Vector)data.get("s3");
+		m_shift = shift;
+	}
+
+	private static DFEVector<DFEComplex> muxInput(LQCDConstants constants,
+		DFEVector<DFEComplex> inLong, DFEVar miscInputCounter)
+	{
+		DFEVector<DFEComplex> in0 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> in1 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> in2 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> toret = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		for(int i=0; i<12; i++)
+		{
+			in0[i]<==inLong[i];
+			in1[i]<==inLong[i+12];
+			in2[i]<==inLong[i+24];
+		}
+		ArrayList< DFEVector<DFEComplex> > a = new ArrayList < DFEVector<DFEComplex> > ();
+		a.add(in0);
+		a.add(in1);
+		a.add(in2);
+
+		toret <== constants.getKernel().control.mux(miscInputCounter, a);
+
+		return toret;
+	}
+
+	protected static DFESpinor createSpinorFromEncoded(LQCDConstants constants,
+			DFEVector<DFEComplex> in, DFEType realType)
+	{
+		DFEVar [] a = new DFEVar[24];
+		DFEVar [] b = new DFEVar[24];
+
+		DFEFix realTypeIn=(DFEFix)in[0].getReal().getType();
+		DFEType realTypeInShaved=dfeFixOffset(realTypeIn.getTotalBits()-1, realTypeIn.getOffset()+1, realTypeIn.getSignMode());
+
+		DFEComplexType complexType= new DFEComplexType(realType);
+
+		DFESpinor outSpinor=
+			new DFESpinor(constants, new DFESpinorType(constants, complexType));
+
+		for(int i=0; i<12; i++)
+		{
+			a[2*i+0]=in[i].getReal();
+			a[2*i+1]=in[i].getImaginary();
+		}
+		for(int i=0; i<24; i++) {
+			b[i]=KernelMath.abs(a[i].slice(1,23).cast(realTypeInShaved));
+		}
+
+		DFEVar [] maxIDs_step0 = new DFEVar[12];
+		DFEVar [] maxVals_step0 = new DFEVar[12];
+		for(int i=0; i<12; i++)
+		{
+			DFEVar comp = (b[2*i] > b[2*i+1]);
+			maxIDs_step0[i] = comp ? outSpinor.constant.var(dfeUInt(5),2*i) : 2*i+1;
+			maxVals_step0[i] = comp ? b[2*i] : b[2*i+1];
+		}
+
+		DFEVar [] tributeIDs = new DFEVar[6];
+		for(int i=0; i<6; i++)
+		{
+			DFEVar comp = (maxVals_step0[2*i] > maxVals_step0[2*i+1]);
+			tributeIDs[i] = comp ? maxIDs_step0[2*i] : maxIDs_step0[2*i+1];
+		}
+
+		DFEVar [] expShiftBits = new DFEVar[6];
+
+		for(int i=0; i<6; i++)
+		{
+			DFEVar muxDeterminator =
+				(tributeIDs[i]-outSpinor.constant.var(dfeUInt(5),4*i)).cast(dfeUInt(2));
+
+			expShiftBits[i]=outSpinor.control.mux(muxDeterminator,
+					a[4*i+0].get(0).cast(dfeUInt(1)),
+					a[4*i+1].get(0).cast(dfeUInt(1)),
+					a[4*i+2].get(0).cast(dfeUInt(1)),
+					a[4*i+3].get(0).cast(dfeUInt(1)));
+		}
+
+		DFEVar biasedExpShift=expShiftBits[5].cat(expShiftBits[4]).cat(expShiftBits[3])
+						.cat(expShiftBits[2]).cat(expShiftBits[1]).cat(expShiftBits[0])
+						.cast(dfeInt(6)).cast(dfeInt(7));
+
+		outSpinor.optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+				Optimization.offsetLargestMsb(), MathOps.SUB);
+		DFEVar expShift=biasedExpShift-16;
+		outSpinor.optimization.popFixOpMode(MathOps.SUB);
+		//outSpinor.debug.simPrintf("[decode]expShift=%d\n", expShift);
+
+		for(int i=0; i<24; i++)
+		{
+			a[i]=a[i].cast(realType);
+		}
+
+		DFESu3Vector ss0=DFESu3VectorType.newInstance(constants,
+				DFEComplexType.newInstance(constants.getKernel(), a[0], a[1]),
+				DFEComplexType.newInstance(constants.getKernel(), a[8], a[9]),
+				DFEComplexType.newInstance(constants.getKernel(), a[16], a[17]) );
+		DFESu3Vector ss1=DFESu3VectorType.newInstance(constants,
+				DFEComplexType.newInstance(constants.getKernel(), a[2], a[3]),
+				DFEComplexType.newInstance(constants.getKernel(), a[10], a[11]),
+				DFEComplexType.newInstance(constants.getKernel(), a[18], a[19]) );
+		DFESu3Vector ss2=DFESu3VectorType.newInstance(constants,
+				DFEComplexType.newInstance(constants.getKernel(), a[4], a[5]),
+				DFEComplexType.newInstance(constants.getKernel(), a[12], a[13]),
+				DFEComplexType.newInstance(constants.getKernel(), a[20], a[21]) );
+		DFESu3Vector ss3=DFESu3VectorType.newInstance(constants,
+				DFEComplexType.newInstance(constants.getKernel(), a[6], a[7]),
+				DFEComplexType.newInstance(constants.getKernel(), a[14], a[15]),
+				DFEComplexType.newInstance(constants.getKernel(), a[22], a[23]) );
+		outSpinor.s0<==ss0;
+		outSpinor.s1<==ss1;
+		outSpinor.s2<==ss2;
+		outSpinor.s3<==ss3;
+
+		outSpinor.m_shift=expShift;
+
+		return outSpinor;
+	}
+
+	protected static DFESpinor createSpinorFromEncoded(LQCDConstants constants,
+			DFEVector<DFEComplex> in, DFEVar miscInputCounter, DFEType realType)
+	{
+		return createSpinorFromEncoded(constants,
+				muxInput(constants, in, miscInputCounter), realType);
+	}
+
+	protected static DFESpinor createSpinorFromEncodedHalfClover(LQCDConstants constants,
+			DFEVector<DFEComplex> in, DFEVar miscInputCounter, DFEType realType)
+	{
+		return createSpinorFromEncoded(constants,
+				muxInputHalfClover(constants, in, miscInputCounter), realType);
+	}
+
+	private static DFEVector<DFEComplex> muxInputHalfClover(LQCDConstants constants,
+			DFEVector<DFEComplex> inLong, DFEVar miscInputCounter)
+	{
+		DFEVector<DFEComplex> in0 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> in1 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> in2 = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		DFEVector<DFEComplex> toret = LQCDConstants.getVectoredFixSpinorType().newInstance(constants.getKernel());
+		for(int i=0; i<12; i++)
+		{
+			in0[i]<==inLong[i];
+			in2[i]<==inLong[i+6];
+		}
+		for(int i=0; i<6; i++)
+		{
+			in1[i]<==constants.getKernel().stream.offset(inLong[i+12], -1);
+		}
+		for(int i=0; i<6; i++)
+		{
+			in1[i+6]<==inLong[i];
+		}
+		ArrayList< DFEVector<DFEComplex> > a = new ArrayList < DFEVector<DFEComplex> > ();
+		a.add(in0);
+		a.add(in1);
+		a.add(in2);
+
+		toret <== constants.getKernel().control.mux(miscInputCounter, a);
+		return toret;
+	}
+
+	public DFESu3Vector setS0(DFESu3Vector src)
+	{
+		s0 <== src;
+		return s0;
+	}
+	public DFESu3Vector setS1(DFESu3Vector src)
+	{
+		s1 <== src;
+		return s1;
+	}
+	public DFESu3Vector setS2(DFESu3Vector src)
+	{
+		s2 <== src;
+		return s2;
+	}
+	public DFESu3Vector setS3(DFESu3Vector src)
+	{
+		s3 <== src;
+		return s3;
+	}
+
+	public DFEType getRealType()
+	{
+		return (DFEType)m_type.getS0Type().getC0Type().getRealType();
+	}
+
+	public DFESpinorType getType()
+	{
+		return m_type;
+	}
+
+	public DFESpinor castElements(DFEType toCastTo)
+	{
+		return DFESpinorType.newInstance(m_constants,
+				s0.castElements(toCastTo),
+				s1.castElements(toCastTo),
+				s2.castElements(toCastTo),
+				s3.castElements(toCastTo),
+				this.m_shift
+		);
+	}
+	public DFESpinor castElements(DFESpinorType toCastTo)
+	{
+		return DFESpinorType.newInstance(m_constants,
+				s0.castElements(toCastTo.getS0Type()),
+				s1.castElements(toCastTo.getS1Type()),
+				s2.castElements(toCastTo.getS2Type()),
+				s3.castElements(toCastTo.getS3Type()),
+				this.m_shift
+		);
+	}
+
+
+	public DFEType findMinimumType()
+	{
+		DFEType s0c0min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s0.getC0().getType().getRealType(),
+				(DFEType)s0.getC0().getType().getImaginaryType() );
+		DFEType s0c1min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s0.getC1().getType().getRealType(),
+				(DFEType)s0.getC1().getType().getImaginaryType() );
+		DFEType s0c2min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s0.getC2().getType().getRealType(),
+				(DFEType)s0.getC2().getType().getImaginaryType() );
+		DFEType s1c0min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s1.getC0().getType().getRealType(),
+				(DFEType)s1.getC0().getType().getImaginaryType() );
+		DFEType s1c1min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s1.getC1().getType().getRealType(),
+				(DFEType)s1.getC1().getType().getImaginaryType() );
+		DFEType s1c2min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s1.getC2().getType().getRealType(),
+				(DFEType)s1.getC2().getType().getImaginaryType() );
+		DFEType s2c0min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s2.getC0().getType().getRealType(),
+				(DFEType)s2.getC0().getType().getImaginaryType() );
+		DFEType s2c1min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s2.getC1().getType().getRealType(),
+				(DFEType)s2.getC1().getType().getImaginaryType() );
+		DFEType s2c2min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s2.getC2().getType().getRealType(),
+				(DFEType)s2.getC2().getType().getImaginaryType() );
+		DFEType s3c0min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s3.getC0().getType().getRealType(),
+				(DFEType)s3.getC0().getType().getImaginaryType() );
+		DFEType s3c1min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s3.getC1().getType().getRealType(),
+				(DFEType)s3.getC1().getType().getImaginaryType() );
+		DFEType s3c2min = DFESu3VectorType.findSmallestTypeThatFits(
+				(DFEType)s3.getC2().getType().getRealType(),
+				(DFEType)s3.getC2().getType().getImaginaryType() );
+
+		DFEType min00 = DFESu3VectorType.findSmallestTypeThatFits(s0c0min, s1c0min);
+		DFEType min01 = DFESu3VectorType.findSmallestTypeThatFits(s2c0min, s3c0min);
+		DFEType min10 = DFESu3VectorType.findSmallestTypeThatFits(s0c1min, s1c1min);
+		DFEType min11 = DFESu3VectorType.findSmallestTypeThatFits(s2c1min, s3c1min);
+		DFEType min20 = DFESu3VectorType.findSmallestTypeThatFits(s0c2min, s1c2min);
+		DFEType min21 = DFESu3VectorType.findSmallestTypeThatFits(s2c2min, s3c2min);
+
+		DFEType a = DFESu3VectorType.findSmallestTypeThatFits( min00, min01 );
+		DFEType b = DFESu3VectorType.findSmallestTypeThatFits( min10, min11 );
+		DFEType c = DFESu3VectorType.findSmallestTypeThatFits( min20, min21 );
+
+		return DFESu3VectorType.findSmallestTypeThatFits(a,
+				DFESu3VectorType.findSmallestTypeThatFits(b, c)
+		);
+
+	}
+
+	public DFESpinor castElementsToMatch()
+	{
+		return this.castElements(
+			this.findMinimumType()
+		);
+	}
+
+	/**
+	 * Works the same as streamoffset for DFEVars, except that it is defined for DFESpinors
+	 * @param offset integer offset
+	 * @return the object holding the offsetted spinor
+	 */
+	public DFESpinor streamoffset(int offset) {
+		return DFESpinorType.newInstance(m_constants,
+				s0.streamoffset(offset),
+				s1.streamoffset(offset),
+				s2.streamoffset(offset),
+				s3.streamoffset(offset),
+				stream.offset(m_shift, offset) );
+	}
+
+	public DFESpinor shift(DFEVar shiftBy)
+	{
+		DFEVar shiftLeft = shiftBy>0;
+		DFEVar shiftByAbs=KernelMath.abs(shiftBy);
+		shiftByAbs = KernelMath.min(
+			constant.var(shiftByAbs.getType(), 31),
+			shiftByAbs);
+		DFEVar shiftByAbsCast = shiftByAbs.cast(dfeUInt(5));
+
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+						Optimization.offsetLargestMsb(), MathOps.SUB);
+		DFEVar newShift = this.m_shift - shiftBy;
+		optimization.popFixOpMode(MathOps.SUB);
+
+		DFESpinor toRet = DFESpinorType.newInstance(m_constants,
+				s0.shift(shiftByAbsCast, shiftLeft),
+				s1.shift(shiftByAbsCast, shiftLeft),
+				s2.shift(shiftByAbsCast, shiftLeft),
+				s3.shift(shiftByAbsCast, shiftLeft),
+				newShift);
+		return toRet;
+	}
+
+	DFESpinor shiftRight(DFEVar shiftBy)
+	{
+		if(((DFEFix)shiftBy.getType()).getSignMode()!=SignMode.UNSIGNED)
+		{
+			throw new RuntimeException(
+					"shiftRight only takes unsigned integers!");
+		}
+
+		if(shiftBy.getType().getTotalBits() > 5)
+		{
+			shiftBy = KernelMath.min(shiftBy, constant.var(shiftBy.getType(), 31));
+			shiftBy = shiftBy.cast(dfeUInt(5));
+		}
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+								Optimization.offsetLargestMsb(), MathOps.ADD);
+		DFEVar newShift = this.m_shift + shiftBy;
+		optimization.popFixOpMode(MathOps.ADD);
+
+		return DFESpinorType.newInstance(m_constants,
+				s0.shiftRight(shiftBy),
+				s1.shiftRight(shiftBy),
+				s2.shiftRight(shiftBy),
+				s3.shiftRight(shiftBy),
+				newShift
+		);
+	}
+
+	/**
+	 * Adds this spinor with another spinor and returns the result as a new spinor object
+	 * @param a the addend spinor
+	 * @return the sum spinor
+	 */
+	public DFESpinor add (DFESpinor a) {
+		return DFESpinorType.newInstance(m_constants,
+				s0 + a.s0,
+				s1 + a.s1,
+				s2 + a.s2,
+				s3 + a.s3,
+				this.m_shift );
+	}
+
+	/**
+	 * Adds this spinor to spinor a. Takes into account the shifts as stored in the
+	 * DFESpinor objects and shifts one or the other accordingly before adding.
+	 * @param a The addend spinor
+	 * @return the sum spinor
+	 */
+	public DFESpinor carefullyAdd (DFESpinor a)
+	{
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+				Optimization.offsetLargestMsb(), MathOps.SUB);
+		DFEVar expDiff = this.m_shift - a.m_shift;
+		optimization.popFixOpMode(MathOps.SUB);
+		DFEVar expDiffGTZ = (expDiff > 0);
+		DFEVar expDiffAbs = KernelMath.abs(expDiff).cast(
+				dfeUInt(expDiff.getType().getTotalBits()) );
+		DFEVar thisShift = expDiffGTZ ? 0 : expDiffAbs;
+		DFEVar aShift = expDiffGTZ ? expDiffAbs : 0;
+
+		return this.shiftRight(thisShift) + a.shiftRight(aShift);
+	}
+	/**
+	 * Adds this spinor to spinor a. Takes into account the shifts as stored in the
+	 * DFESpinor objects and shifts one or the other accordingly before adding.
+	 * @param a The addend spinor
+	 * @param bitSizeOfShift Before the shift, the variable that contains the amount
+	 * to shift by will be cast to this number of bits. Lowering this number will reduce resource usage.
+	 * @return The sum spinor
+	 */
+	public DFESpinor carefullyAdd (DFESpinor a, int bitSizeOfShift)
+	{
+		optimization.pushFixOpMode(Optimization.bitSizeLargest(),
+				Optimization.offsetLargestMsb(), MathOps.SUB);
+		DFEVar expDiff = this.m_shift - a.m_shift;
+		optimization.popFixOpMode(MathOps.SUB);
+		DFEVar expDiffGTZ = (expDiff > 0);
+		DFEVar expDiffAbs = KernelMath.abs(expDiff).cast(
+				dfeUInt(expDiff.getType().getTotalBits()) );
+		DFEVar thisShift = expDiffGTZ ? 0 : expDiffAbs;
+		DFEVar aShift = expDiffGTZ ? expDiffAbs : 0;
+		thisShift = thisShift.cast(dfeUInt(bitSizeOfShift));
+		aShift = aShift.cast(dfeUInt(bitSizeOfShift));
+
+		return this.shiftRight(thisShift) + a.shiftRight(aShift);
+	}
+
+	/**
+	 * Multiply each element of this spinor with a DFEVar and returns the result as a new spinor object
+	 * @param a the multiplicand
+	 * @return the result of Spinor-number multiply
+	 */
+	public DFESpinor mul (DFEVar a) {
+		return DFESpinorType.newInstance(m_constants,
+				s0 * a,
+				s1 * a,
+				s2 * a,
+				s3 * a,
+				this.m_shift
+				);
+	}
+
+	/**
+	 * Negate each element of this spinor
+	 * @return the negation of the spinor
+	 */
+	public DFESpinor neg () {
+		return DFESpinorType.newInstance(m_constants,
+				-s0,
+				-s1,
+				-s2,
+				-s3,
+				this.m_shift
+				);
+
+	}
+
+	/**
+	 * Connects each element of this spinor with the element of an input spinor
+	 * @param a the input spinor to connect with
+	 */
+	public void connect (DFESpinor a) {
+		s0 <== a.s0;
+		s1 <== a.s1;
+		s2 <== a.s2;
+		s3 <== a.s3;
+		m_shift <== a.m_shift;
+	}
+
+	public DFEVar normSq()
+	{
+		return ( s0.normSq() + s1.normSq() ) + ( s2.normSq() + s3.normSq() );
+	}
+
+	public ArrayList<DFEVar> getTributeIDsAndMax()
+	{
+		DFEVar [] a = new DFEVar[24];
+
+		a[0] =s0.getC0().getReal(); a[1] =s0.getC0().getImaginary();
+		a[2] =s1.getC0().getReal(); a[3] =s1.getC0().getImaginary();
+		a[4] =s2.getC0().getReal(); a[5] =s2.getC0().getImaginary();
+		a[6] =s3.getC0().getReal(); a[7] =s3.getC0().getImaginary();
+		a[8] =s0.getC1().getReal(); a[9] =s0.getC1().getImaginary();
+		a[10]=s1.getC1().getReal(); a[11]=s1.getC1().getImaginary();
+		a[12]=s2.getC1().getReal(); a[13]=s2.getC1().getImaginary();
+		a[14]=s3.getC1().getReal(); a[15]=s3.getC1().getImaginary();
+		a[16]=s0.getC2().getReal(); a[17]=s0.getC2().getImaginary();
+		a[18]=s1.getC2().getReal(); a[19]=s1.getC2().getImaginary();
+		a[20]=s2.getC2().getReal(); a[21]=s2.getC2().getImaginary();
+		a[22]=s3.getC2().getReal(); a[23]=s3.getC2().getImaginary();
+		for(int i=0; i<24; i++) { a[i]=KernelMath.abs(a[i]); }
+
+		DFEVar [] maxID0 = new DFEVar[12];
+		DFEVar [] maxVal0 = new DFEVar[12];
+		for(int i=0; i<12; i++)
+		{
+			DFEVar comp = (a[2*i] > a[2*i+1]);
+			maxID0[i] = comp ? constant.var(dfeUInt(5),2*i) : 2*i+1;
+			maxVal0[i] = comp ? a[2*i] : a[2*i+1];
+		}
+
+		DFEVar [] maxID1 = new DFEVar[6];
+		DFEVar [] maxVal1 = new DFEVar[6];
+		for(int i=0; i<6; i++)
+		{
+			DFEVar comp = (maxVal0[2*i] > maxVal0[2*i+1]);
+			maxID1[i] = comp ? maxID0[2*i] : maxID0[2*i+1];
+			maxVal1[i] = comp ? maxVal0[2*i] : maxVal0[2*i+1];
+		}
+
+		DFEVar maxValTotA=KernelMath.max(maxVal1[0], maxVal1[1]);
+		DFEVar maxValTotB=KernelMath.max(maxVal1[2], maxVal1[3]);
+		DFEVar maxValTotC=KernelMath.max(maxVal1[4], maxVal1[5]);
+		DFEVar maxValTot=KernelMath.max(
+				KernelMath.max(maxValTotA, maxValTotB), maxValTotC);
+
+		ArrayList<DFEVar> toret = new ArrayList<DFEVar>();
+		toret.add(maxValTot);
+		toret.add(maxID1[0]);
+		toret.add(maxID1[1]);
+		toret.add(maxID1[2]);
+		toret.add(maxID1[3]);
+		toret.add(maxID1[4]);
+		toret.add(maxID1[5]);
+		return toret;
+	}
+
+	/**
+	 * converts the spinor to a vector of complex numbers, suitable for output ports
+	 * @return the vectored spinor
+	 */
+	public DFEVector<DFEComplex> convertToDFEVector () {
+		DFEVector<DFEComplex> result =
+			LQCDConstants.getVectoredSpinorType().newInstance(this);
+
+		//Refer to the ctor for more info on ordering
+		result[0]  <== s0.getC0().cast(LQCDConstants.complexTypeStore);
+		result[1]  <== s1.getC0().cast(LQCDConstants.complexTypeStore);
+		result[2]  <== s2.getC0().cast(LQCDConstants.complexTypeStore);
+		result[3]  <== s3.getC0().cast(LQCDConstants.complexTypeStore);
+		result[4]  <== s0.getC1().cast(LQCDConstants.complexTypeStore);
+		result[5]  <== s1.getC1().cast(LQCDConstants.complexTypeStore);
+		result[6]  <== s2.getC1().cast(LQCDConstants.complexTypeStore);
+		result[7]  <== s3.getC1().cast(LQCDConstants.complexTypeStore);
+		result[8]  <== s0.getC2().cast(LQCDConstants.complexTypeStore);
+		result[9]  <== s1.getC2().cast(LQCDConstants.complexTypeStore);
+		result[10] <== s2.getC2().cast(LQCDConstants.complexTypeStore);
+		result[11] <== s3.getC2().cast(LQCDConstants.complexTypeStore);
+
+		return result;
+	}
+
+
+	/**
+	 * converts the spinor to a vector of complex numbers, suitable for output ports
+	 * @return the vectored spinor
+	 */
+	public DFEVector<DFEComplex> convertToFloatDFEVector (DFEVar expShift) {
+		DFEVector<DFEComplex> result =
+			LQCDConstants.getVectoredSpinorType().newInstance(this);
+
+
+
+		result[0]  <== s0.getC0().cast(LQCDConstants.complexTypeStore);
+		result[1]  <== s1.getC0().cast(LQCDConstants.complexTypeStore);
+		result[2]  <== s2.getC0().cast(LQCDConstants.complexTypeStore);
+		result[3]  <== s3.getC0().cast(LQCDConstants.complexTypeStore);
+		result[4]  <== s0.getC1().cast(LQCDConstants.complexTypeStore);
+		result[5]  <== s1.getC1().cast(LQCDConstants.complexTypeStore);
+		result[6]  <== s2.getC1().cast(LQCDConstants.complexTypeStore);
+		result[7]  <== s3.getC1().cast(LQCDConstants.complexTypeStore);
+		result[8]  <== s0.getC2().cast(LQCDConstants.complexTypeStore);
+		result[9]  <== s1.getC2().cast(LQCDConstants.complexTypeStore);
+		result[10] <== s2.getC2().cast(LQCDConstants.complexTypeStore);
+		result[11] <== s3.getC2().cast(LQCDConstants.complexTypeStore);
+
+
+		DFEVector<DFEComplex> updatedResult=result.getType().newInstance(this);
+		for(int i=0; i<12; i++)
+		{
+			DFEVar expre=result[i].getReal().slice(23, 8).cast(dfeInt(8));
+			DFEVar restre1=result[i].getReal().slice(0, 23).cast(dfeInt(23));
+			DFEVar restre2=result[i].getReal().slice(31, 1).cast(dfeInt(1));
+			DFEVar expim=result[i].getImaginary().slice(23, 8).cast(dfeInt(8));
+			DFEVar restim1=result[i].getImaginary().slice(0, 23).cast(dfeInt(23));
+			DFEVar restim2=result[i].getImaginary().slice(31, 1).cast(dfeInt(1));
+			expre+=expShift;
+			expim+=expShift;
+			updatedResult[i].setReal(restre2.cat(expre).cat(restre1).cast(dfeFloat(8,24)));
+			updatedResult[i].setImaginary(restim2.cat(expim).cat(restim1).cast(dfeFloat(8,24)));
+		}
+		return updatedResult;
+	}
+
+	public DFEVector<DFEComplex> convertToDFEVector (DFEVar expShift, DFEVar enableDebugOutput,
+			DFEVar runID, DFEVar x, DFEVar y, DFEVar z, DFEVar t, DFEVar debugShift) {
+		DFEVector<DFEComplex> result =
+			LQCDConstants.getVectoredFixSpinorType().newInstance(this);
+
+		DFEType realType=LQCDConstants.realTypeStoreFix;
+		DFEComplexType complexType = new DFEComplexType(realType);
+
+		ArrayList<DFEComplex> toCast = new ArrayList<DFEComplex>();
+
+		DFEVar sign = expShift>=0;
+
+		DFEVar absExpShift = dfeUInt(5).newInstance(this);
+
+		absExpShift=KernelMath.abs(expShift).cast(dfeUInt(5));
+
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC0().getReal() << absExpShift, s0.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC0().getReal() << absExpShift, s0.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC0().getReal() << absExpShift, s1.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC0().getReal() << absExpShift, s1.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC0().getReal() << absExpShift, s2.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC0().getReal() << absExpShift, s2.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC0().getReal() << absExpShift, s3.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC0().getReal() << absExpShift, s3.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC1().getReal() << absExpShift, s0.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC1().getReal() << absExpShift, s0.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC1().getReal() << absExpShift, s1.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC1().getReal() << absExpShift, s1.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC1().getReal() << absExpShift, s2.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC1().getReal() << absExpShift, s2.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC1().getReal() << absExpShift, s3.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC1().getReal() << absExpShift, s3.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC2().getReal() << absExpShift, s0.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC2().getReal() << absExpShift, s0.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC2().getReal() << absExpShift, s1.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC2().getReal() << absExpShift, s1.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC2().getReal() << absExpShift, s2.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC2().getReal() << absExpShift, s2.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC2().getReal() << absExpShift, s3.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC2().getReal() << absExpShift, s3.getC2().getImaginary()	>> absExpShift) );
+
+		for(int i=0; i<12; i++)
+		{
+			DFEFix realTypeReal=(DFEFix)complexType.getRealType();
+			DFEFix realTypeImag=(DFEFix)complexType.getImaginaryType();
+
+			result[i] <== toCast[i].cast(complexType);
+
+			DFEVar overFlowFlag=(toCast[i].getReal()>realTypeReal.getMax() |
+					toCast[i].getImaginary()>realTypeImag.getMax() |
+					toCast[i].getReal()<-realTypeReal.getMax() |
+					toCast[i].getImaginary()<-realTypeImag.getMax() );
+			debug.simPrintf(overFlowFlag & (enableDebugOutput!==0), "Detected overflow (output# = %d, run-ID=%d; x=%d, y=%d, z=%d, t=%d)! " +
+						"Value before cast: ( %f, %f )\n" +
+						"Value after cast:  ( %f, %f ) (shift = %d)\n",
+						enableDebugOutput, runID, x, y, z, t,
+						toCast[i].getReal(), toCast[i].getImaginary(),
+						result[i].getReal(), result[i].getImaginary(),
+						debugShift);
+		}
+		return result;
+
+	}
+
+	public DFEVector<DFEComplex> convertToDFEVector (DFEVar expShift) {
+		DFEVector<DFEComplex> result =
+			LQCDConstants.getVectoredFixSpinorType().newInstance(this);
+
+		DFEType realType=LQCDConstants.realTypeStoreFix;
+		DFEComplexType complexType = new DFEComplexType(realType);
+
+		ArrayList<DFEComplex> toCast = new ArrayList<DFEComplex>();
+
+		DFEVar sign = expShift>=0;
+
+		DFEVar absExpShift = dfeUInt(5).newInstance(this);
+
+		absExpShift=KernelMath.abs(expShift).cast(dfeUInt(5));
+
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC0().getReal() << absExpShift, s0.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC0().getReal() << absExpShift, s0.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC0().getReal() << absExpShift, s1.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC0().getReal() << absExpShift, s1.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC0().getReal() << absExpShift, s2.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC0().getReal() << absExpShift, s2.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC0().getReal() << absExpShift, s3.getC0().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC0().getReal() << absExpShift, s3.getC0().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC1().getReal() << absExpShift, s0.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC1().getReal() << absExpShift, s0.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC1().getReal() << absExpShift, s1.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC1().getReal() << absExpShift, s1.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC1().getReal() << absExpShift, s2.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC1().getReal() << absExpShift, s2.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC1().getReal() << absExpShift, s3.getC1().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC1().getReal() << absExpShift, s3.getC1().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC2().getReal() << absExpShift, s0.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s0.getC2().getReal() << absExpShift, s0.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC2().getReal() << absExpShift, s1.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s1.getC2().getReal() << absExpShift, s1.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC2().getReal() << absExpShift, s2.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s2.getC2().getReal() << absExpShift, s2.getC2().getImaginary()	>> absExpShift) );
+		toCast.add(sign? 	DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC2().getReal() << absExpShift, s3.getC2().getImaginary() >> absExpShift) :
+							DFEComplexType.newInstance(m_constants.getKernel(),
+			s3.getC2().getReal() << absExpShift, s3.getC2().getImaginary()	>> absExpShift) );
+
+		for(int i=0; i<12; i++)
+		{
+			result[i] <== toCast[i].cast(complexType);
+		}
+		return result;
+
+	}
+
+	public DFEVector<DFEComplex> convertToDFEVectorWithEncoding (DFEVar expShiftToEncode) {
+		DFEFix realType = (DFEFix) LQCDConstants.realTypeStoreFix;
+		DFEComplexType complexType = new DFEComplexType(realType);
+
+
+		DFEType realTypeShaved=dfeFixOffset(realType.getTotalBits()-1, realType.getOffset()+1, realType.getSignMode());
+
+		DFEVar [] a = new DFEVar[24];
+		DFEVar [] b = new DFEVar[24];
+
+		a[0] =s0.getC0().getReal(); a[1] =s0.getC0().getImaginary();
+		a[2] =s1.getC0().getReal(); a[3] =s1.getC0().getImaginary();
+		a[4] =s2.getC0().getReal(); a[5] =s2.getC0().getImaginary();
+		a[6] =s3.getC0().getReal(); a[7] =s3.getC0().getImaginary();
+		a[8] =s0.getC1().getReal(); a[9] =s0.getC1().getImaginary();
+		a[10]=s1.getC1().getReal(); a[11]=s1.getC1().getImaginary();
+		a[12]=s2.getC1().getReal(); a[13]=s2.getC1().getImaginary();
+		a[14]=s3.getC1().getReal(); a[15]=s3.getC1().getImaginary();
+		a[16]=s0.getC2().getReal(); a[17]=s0.getC2().getImaginary();
+		a[18]=s1.getC2().getReal(); a[19]=s1.getC2().getImaginary();
+		a[20]=s2.getC2().getReal(); a[21]=s2.getC2().getImaginary();
+		a[22]=s3.getC2().getReal(); a[23]=s3.getC2().getImaginary();
+		for(int i=0; i<24; i++) {
+			a[i]=a[i].cast(realType);
+			b[i]=KernelMath.abs(a[i].slice(1,23).cast(realTypeShaved));
+		}
+
+		DFEVar [] maxIDs_step0 = new DFEVar[12];
+		DFEVar [] maxVals_step0 = new DFEVar[12];
+		for(int i=0; i<12; i++)
+		{
+			DFEVar comp = (b[2*i] > b[2*i+1]);
+			maxIDs_step0[i] = comp ? constant.var(dfeUInt(5),2*i) : 2*i+1;
+			maxVals_step0[i] = comp ? b[2*i] : b[2*i+1];
+		}
+
+		DFEVar [] tributeIDs = new DFEVar[6];
+		for(int i=0; i<6; i++)
+		{
+			DFEVar comp = (maxVals_step0[2*i] > maxVals_step0[2*i+1]);
+			tributeIDs[i] = comp ? maxIDs_step0[2*i] : maxIDs_step0[2*i+1];
+		}
+
+		DFEVar biasedShift = expShiftToEncode + 16;
+
+		for(int i=0; i<6; i++)
+		{
+			a[4*i+0] = tributeIDs[i]===constant.var(dfeUInt(5),4*i+0) ?
+					a[4*i+0].slice(1,23).cat(biasedShift[i]).cast(realType) : a[4*i+0];
+			a[4*i+1] = tributeIDs[i]===constant.var(dfeUInt(5),4*i+1) ?
+					a[4*i+1].slice(1,23).cat(biasedShift[i]).cast(realType) : a[4*i+1];
+			a[4*i+2] = tributeIDs[i]===constant.var(dfeUInt(5),4*i+2) ?
+					a[4*i+2].slice(1,23).cat(biasedShift[i]).cast(realType) : a[4*i+2];
+			a[4*i+3] = tributeIDs[i]===constant.var(dfeUInt(5),4*i+3) ?
+					a[4*i+3].slice(1,23).cat(biasedShift[i]).cast(realType) : a[4*i+3];
+		}
+		DFEVector<DFEComplex> result =
+					LQCDConstants.getVectoredFixSpinorType().newInstance(this);
+		for(int i=0; i<12; i++)
+		{
+			DFEComplex toLink = complexType.newInstance(this);
+			toLink.setReal(a[2*i+0]);
+			toLink.setImaginary(a[2*i+1]);
+			result[i] <== toLink;
+		}
+		return result;
+	}
+
+	public void checkSizes()
+	{
+		s0.checkSizes();
+		s1.checkSizes();
+		s2.checkSizes();
+		s3.checkSizes();
+	}
+
+
+	public DFEVar getMaximum()
+	{
+		DFEVar a = KernelMath.max(
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s0.getC0().getReal()),
+									KernelMath.abs(s0.getC0().getImaginary())),
+							KernelMath.max(KernelMath.abs(s0.getC1().getReal()),
+									KernelMath.abs(s0.getC2().getImaginary()))
+						),
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s0.getC2().getReal()),
+									KernelMath.abs(s0.getC2().getImaginary())),
+							KernelMath.max(KernelMath.abs(s1.getC0().getReal()),
+									KernelMath.abs(s1.getC0().getImaginary()))
+						)
+					);
+		DFEVar b = KernelMath.max(
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s1.getC1().getReal()),
+									KernelMath.abs(s1.getC1().getImaginary())),
+							KernelMath.max(KernelMath.abs(s1.getC2().getReal()),
+									KernelMath.abs(s1.getC2().getImaginary()))
+						),
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s2.getC0().getReal()),
+									KernelMath.abs(s2.getC0().getImaginary())),
+							KernelMath.max(KernelMath.abs(s2.getC1().getReal()),
+									KernelMath.abs(s2.getC1().getImaginary()))
+						)
+					);
+		DFEVar c = KernelMath.max(
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s2.getC2().getReal()),
+									KernelMath.abs(s2.getC2().getImaginary())),
+							KernelMath.max(KernelMath.abs(s3.getC0().getReal()),
+									KernelMath.abs(s3.getC0().getImaginary()))
+						),
+						KernelMath.max(
+							KernelMath.max(KernelMath.abs(s3.getC1().getReal()),
+									KernelMath.abs(s3.getC1().getImaginary())),
+							KernelMath.max(KernelMath.abs(s3.getC2().getReal()),
+									KernelMath.abs(s3.getC2().getImaginary()))
+						)
+					);
+		return KernelMath.max(KernelMath.max(a, b), c);
+	}
+}
